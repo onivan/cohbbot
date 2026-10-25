@@ -1,0 +1,20 @@
+# Telegram Bot Framework (v3.x)
+aiogram>=3.0.0,<4.0.0
+
+# AI & Google Gemini SDK
+google-genai
+
+# Web App Backend & Templates
+fastapi>=0.100.0
+uvicorn[standard]
+jinja2
+pydantic
+python-multipart
+
+# Google Cloud, Sheets & Billing Integration
+gspread
+google-auth
+google-cloud-billing
+
+# Image Processing (Pillow)
+Pillow

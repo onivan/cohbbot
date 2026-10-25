@@ -1,0 +1,171 @@
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List
+import database
+import asyncio  
+import os
+import uuid
+import logging
+from datetime import datetime
+from config import WEBAPP_URL
+
+app = FastAPI(title="Expense Tracker WebApp")
+templates = Jinja2Templates(directory="templates")
+
+# Монтування папки з фотографіями чеків
+os.makedirs("receipts", exist_ok=True)
+app.mount("/receipts", StaticFiles(directory="receipts"), name="receipts")
+
+
+# Pydantic моделі валідації
+class ExpenseData(BaseModel):
+    date: str
+    amount: float
+    expense_name: str
+    category: str  # Зберігає category_id або назву
+    file_path: Optional[str] = ""
+    msg_id: Optional[int] = None
+
+class CenterData(BaseModel):
+    center: str
+
+class CategoriesData(BaseModel):
+    categories: List[str]
+
+class CategoryActionData(BaseModel):
+    category: str
+    old_category: Optional[str] = None
+    category_id: Optional[str] = None
+    sort_order: Optional[int] = 999
+
+
+@app.get("/")
+async def read_root(request: Request):
+    return templates.TemplateResponse(request=request, name="index.html", context={"request": request})
+
+
+# ==========================================
+# 1. ЕНДПОЇНТИ КАТЕГОРІЙ ТА НАЛАШТУВАНЬ
+# ==========================================
+
+@app.get("/api/categories")
+async def fetch_categories():
+    categories = await asyncio.to_thread(database.get_categories)
+    return {"status": "ok", "data": categories}
+
+@app.get("/api/categories/{user_id}")
+async def fetch_user_categories(user_id: int):
+    categories = await asyncio.to_thread(database.get_categories, user_id)
+    return {"status": "ok", "data": categories}
+
+@app.post("/api/categories/{user_id}")
+async def update_user_categories(user_id: int, data: CategoriesData):
+    await database.save_user_categories(user_id, data.categories)
+    return {"status": "ok"}
+
+@app.post("/api/categories/{user_id}/add")
+async def add_category_endpoint(user_id: int, data: CategoryActionData):
+    await database.add_user_category(user_id, data.category, data.sort_order)
+    return {"status": "ok"}
+
+@app.post("/api/categories/{user_id}/delete")
+async def delete_category_endpoint(user_id: int, data: CategoryActionData):
+    await database.delete_user_category(user_id, data.category)
+    return {"status": "ok"}
+
+@app.post("/api/categories/{user_id}/rename")
+async def rename_category_endpoint(user_id: int, data: CategoryActionData):
+    if data.old_category:
+        await database.rename_user_category(user_id, data.old_category, data.category)
+    return {"status": "ok"}
+
+@app.get("/api/user/{user_id}/center")
+async def get_center(user_id: int):
+    u_info = database.users_cache.get(str(user_id), {})
+    return {"status": "ok", "center": u_info.get("center", "МійЦентр")}
+
+@app.post("/api/user/{user_id}/center")
+async def set_center(user_id: int, data: CenterData):
+    await database.update_user_center(user_id, data.center)
+    return {"status": "ok"}
+
+
+# ==========================================
+# 2. ЗАВАНТАЖЕННЯ ЧЕКІВ
+# ==========================================
+
+@app.post("/api/upload/{user_id}")
+async def upload_receipt(user_id: int, file: UploadFile = File(...)):
+    dt = datetime.now()
+    year = dt.strftime("%Y")
+    month = dt.strftime("%m")
+    date_str = dt.strftime("%Y-%m-%d")
+    time_str = dt.strftime("%H-%M-%S")
+    
+    u_info = database.users_cache.get(str(user_id), {'name': 'User', 'center': 'Центр'})
+    center_name = u_info.get('center', 'Центр')
+    safe_center = "".join(c for c in center_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(" ", "_")
+    
+    random_suffix = uuid.uuid4().hex[:6]
+    ext = os.path.splitext(file.filename)[1].lower() or '.jpg'
+
+    folder_path = f"receipts/{user_id}/{year}/{month}"
+    os.makedirs(folder_path, exist_ok=True)
+    
+    file_name = f"{date_str}_{time_str}-{safe_center}_{random_suffix}{ext}"
+    local_path = f"{folder_path}/{file_name}"
+    
+    with open(local_path, "wb") as buffer:
+        buffer.write(await file.read())
+        
+    file_url = f"{WEBAPP_URL}/{local_path}"
+    return {"status": "ok", "file_path": file_url}
+
+
+# ==========================================
+# 3. ЕНДПОЇНТИ ВИ ТРАТ (CRUD)
+# ==========================================
+
+@app.get("/api/expenses/{user_id}")
+async def get_expenses(user_id: int):
+    expenses = await database.get_user_expenses(user_id)
+    return {"status": "ok", "data": expenses}
+
+@app.post("/api/expenses/{user_id}")
+async def create_expense(user_id: int, data: ExpenseData):
+    u_info = database.users_cache.get(str(user_id), {'name': 'Web User'})
+    row_data = [data.date, str(user_id), u_info['name'], data.amount, data.expense_name, data.category, data.file_path]
+    expense_id = await database.add_expense(row_data)
+    
+    # Видалення повідомлення в боті після швидкого збереження чернетки
+    if data.msg_id:
+        try:
+            from handlers import bot, dp
+            from aiogram.fsm.context import FSMContext
+            from aiogram.fsm.storage.base import StorageKey
+            await bot.delete_message(chat_id=user_id, message_id=data.msg_id)
+            await bot.send_message(chat_id=user_id, text=f"✅ Витрату «{data.expense_name}» на {data.amount} грн успішно збережено!")
+            state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+            await state.clear()
+        except Exception as e:
+            logging.error(f"Error updating bot message: {e}")
+
+    return {"status": "ok", "expense_id": expense_id}
+
+@app.put("/api/expenses/{user_id}/{expense_id}")
+async def edit_expense(user_id: int, expense_id: str, data: ExpenseData):
+    u_info = database.users_cache.get(str(user_id), {'name': 'Web User'})
+    row_data = [data.date, str(user_id), u_info['name'], data.amount, data.expense_name, data.category, data.file_path]
+    success = await database.update_expense(expense_id, user_id, row_data)
+    if not success:
+        raise HTTPException(status_code=404, detail="Запис не знайдено або немає доступу")
+    return {"status": "ok"}
+
+@app.delete("/api/expenses/{user_id}/{expense_id}")
+async def remove_expense(user_id: int, expense_id: str):
+    success = await database.delete_expense(expense_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Запис не знайдено або немає доступу")
+    return {"status": "ok"}

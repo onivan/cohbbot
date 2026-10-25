@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мої витрати</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .expense-card { border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: var(--tg-theme-secondary-bg-color, #f4f4f4); transition: background-color 0.3s ease; }
+        .header { display: flex; justify-content: space-between; font-weight: bold; }
+        .details { font-size: 0.9em; color: var(--tg-theme-hint-color, #888); margin-top: 5px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;}
+        .card-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        button { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+        button:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn-danger { background-color: #e53935; color: white; }
+        .btn-sm { padding: 5px 10px; font-size: 0.8em; }
+        
+        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;}
+        .modal-content { background: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 20px; border-radius: 10px; max-width: 400px; margin: 20px auto; animation: fadeInModal 0.2s ease-in-out; }
+        
+        #receipt-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); padding: 10px; box-sizing: border-box; z-index: 200; justify-content: center; align-items: center; flex-direction: column;}
+        #receipt-image { max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 8px; margin-bottom: 15px; background: white;}
+        .receipt-btn { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 0.8em;}
+        
+        .form-group { margin-bottom: 15px; display: flex; flex-direction: column; }
+        input, select { padding: 8px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 4px; background: var(--tg-theme-secondary-bg-color, #f4f4f4); color: var(--tg-theme-text-color, #000000); margin-top: 5px; }
+
+        .loading-overlay {
+            position: fixed; top: 12px; right: 15px; background: rgba(0, 0, 0, 0.75);
+            color: #ffffff; padding: 6px 14px; border-radius: 20px; font-size: 0.8em;
+            display: none; align-items: center; gap: 8px; z-index: 1000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .spinner { width: 14px; height: 14px; border: 2px solid #ffffff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes highlight { 0% { background-color: rgba(51, 144, 236, 0.35); } 100% { background-color: var(--tg-theme-secondary-bg-color, #f4f4f4); } }
+        @keyframes fadeInModal { from { opacity: 0.4; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
+        body.dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
+    </style>
+</head>
+<body>
+    <div id="loading-indicator" class="loading-overlay">
+        <div class="spinner"></div>
+        <span>Оновлення...</span>
+    </div>
+
+    <div class="header-bar">
+        <h2 id="total-header">Витрати: 0.00 грн</h2>
+        <div>
+            <button style="background: #666;" onclick="openSettings()">⚙️ Центр</button>
+            <button style="background: #666;" onclick="openCategoriesModal()">🏷 Категорії</button>
+            <button onclick="openForm()">➕ Додати</button>
+        </div>
+    </div>
+    
+    <div id="expenses-list">Завантаження...</div>
+
+    <!-- Модальне вікно перегляду чека -->
+    <div id="receipt-modal">
+        <button onclick="closeReceipt()" style="align-self: flex-end; margin-bottom: 10px; background: none; font-size: 24px; color: white;">✖️</button>
+        <img id="receipt-image" src="" alt="Фото чека">
+        <a id="receipt-external-link" href="#" target="_blank" style="color: white; margin-top: 10px;">Відкрити в браузері</a>
+    </div>
+
+    <!-- Модальне вікно форми редагування/створення -->
+    <div id="modal">
+        <div class="modal-content">
+            <div id="modal-nav-box" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <button type="button" id="btn-prev" class="btn-sm" onclick="navExpense(-1)">⬅️ Попередня</button>
+                <span style="font-size: 0.8em; color: var(--tg-theme-hint-color, #888);">Перехід між витратами</span>
+                <button type="button" id="btn-next" class="btn-sm" onclick="navExpense(1)">Наступна ➡️</button>
+            </div>
+
+            <h3 id="form-title" style="margin-top: 0;">Додати витрату</h3>
+            <input type="hidden" id="f-expense-id">
+            <input type="hidden" id="f-path">
+            <div class="form-group"><label>Дата:</label><input type="date" id="f-date"></div>
+            <div class="form-group">
+                <label>Сума:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="number" id="f-hryvnia" placeholder="Гривні" min="0" style="flex: 2;">
+                    <span style="align-self: center; font-size: 1.5em; font-weight: bold;">,</span>
+                    <input type="number" id="f-kopeck" placeholder="Коп" min="0" max="99" style="flex: 1;">
+                </div>
+            </div>
+            <div class="form-group"><label>Назва:</label><input type="text" id="f-name"></div>
+            <div class="form-group"><label>Категорія:</label><select id="f-category"></select></div>
+            <div class="form-group">
+                <label>Чек:</label>
+                <div id="receipt-preview-box" style="display: none; align-items: center; gap: 10px; margin-bottom: 5px;">
+                    <button type="button" class="receipt-btn" style="background-color: #4CAF50;" onclick="viewAttachedReceipt()">📄 Переглянути чек</button>
+                    <button type="button" class="btn-sm btn-danger" onclick="removeAttachedReceipt()">❌ Видалити</button>
+                </div>
+                <input type="file" id="f-file" accept="image/*" capture>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn-danger" onclick="closeForm()">Скасувати</button>
+                <button onclick="saveExpense()">Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно налаштування центру -->
+    <div id="settings-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
+        <div class="modal-content">
+            <h3>Налаштування</h3>
+            <div class="form-group"><label>Назва центру:</label><input type="text" id="s-center"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn-danger" onclick="document.getElementById('settings-modal').style.display='none'">Скасувати</button>
+                <button onclick="saveSettings()">Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно налаштування категорій -->
+    <div id="categories-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
+        <div class="modal-content" style="max-width: 400px; margin: 20px auto;">
+            <h3 style="margin-top: 0;">Мої категорії</h3>
+            <div id="categories-list-box" style="max-height: 250px; overflow-y: auto; margin-bottom: 15px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 8px;"></div>
+            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                <input type="text" id="new-cat-input" placeholder="Нова категорія" style="flex: 1; margin: 0;" onkeydown="if(event.key==='Enter') addCategoryToList()">
+                <button type="button" onclick="addCategoryToList()">➕ Додати</button>
+            </div>
+            <div style="display: flex; justify-content: flex-end;">
+                <button onclick="document.getElementById('categories-modal').style.display='none'">Закрити</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function parseDate(rawDate) {
+            if (!rawDate) return null;
+            if (!isNaN(rawDate) && !String(rawDate).includes('-') && !String(rawDate).includes('.')) {
+                const serial = Number(rawDate);
+                const utcDays = serial - 25569;
+                const dateObj = new Date(utcDays * 86400 * 1000);
+                return {
+                    year: dateObj.getUTCFullYear(),
+                    month: String(dateObj.getUTCMonth() + 1).padStart(2, '0'),
+                    day: String(dateObj.getUTCDate()).padStart(2, '0')
+                };
+            }
+            const dateStr = String(rawDate).trim().split(' ')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return { year: parts[0], month: parts[1].padStart(2, '0'), day: parts[2].padStart(2, '0') };
+            }
+            return null;
+        }
+
+        function formatDateForDisplay(rawDate) {
+            const parsed = parseDate(rawDate);
+            if (!parsed) return rawDate || '';
+            return `${parsed.day}.${parsed.month}.${parsed.year}`;
+        }
+
+        function formatDateForInput(rawDate) {
+            const parsed = parseDate(rawDate);
+            if (!parsed) return new Date().toISOString().split('T')[0];
+            return `${parsed.year}-${parsed.month}-${parsed.day}`;
+        }
+
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        if (tg.colorScheme === 'dark') {
+            document.body.classList.add('dark');
+        }
+
+        // БЕЗПЕЧНА АВТОРИЗАЦІЯ ВІД TELEGRAM (без хардкоду)
+        const user = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+        const userId = user ? user.id : null;
+        let allExpenses = [];      
+        let currentEditIndex = -1; 
+        
+        
+
+        function loadExpenses(targetExpenseId = null) {
+            if (!userId) {
+                const debugData = JSON.stringify(tg.initDataUnsafe, null, 2);
+                const currentUrl = window.location.href;
+                debugDataFull = "Full URL:" + window.location.href + "<br>Hash:" + window.location.hash + "<br>Raw initData:" + tg.initData + "<br>initDataUnsafe:" + tg.initDataUnsafe;
+                
+                document.getElementById('expenses-list').innerHTML = 
+                    '<div style="color: red; text-align: center; padding: 20px;">' +
+                    '⚠️ Авторизація недійсний.<br><br>' +
+                    '<div style="color: black; text-align: left; font-size: 12px; background: #eee; padding: 10px; border-radius: 5px; overflow-x: auto;">' +
+                    '<b>URL:</b><br>' + currentUrl + '<br><br>' +
+                    '<b>Full Debug Data:</b><br><pre>' + debugDataFull + '</pre>' +
+                    '</div></div>';
+                document.getElementById('total-header').innerText = 'Помилка доступу';
+                return;
+            }
+
+            const list = document.getElementById('expenses-list');
+            const loadingIndicator = document.getElementById('loading-indicator');
+
+            if (list.children.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--tg-theme-hint-color, #888);">Завантаження...</div>';
+            } else if (loadingIndicator) {
+                loadingIndicator.style.display = 'flex';
+            }
+
+            fetch(`/api/expenses/${userId}`)
+                .then(response => {
+                    if (!response.ok) throw new Error("Помилка доступу");
+                    return response.json();
+                })
+                .then(result => {
+                    if (loadingIndicator) loadingIndicator.style.display = 'none';
+                    allExpenses = result.data || [];
+
+                    let totalSum = 0;
+                    if (!result.data || result.data.length === 0) {
+                        list.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--tg-theme-hint-color, #888);">Витрат поки немає.</div>';
+                        document.getElementById('total-header').innerText = 'Витрати: 0.00 грн';
+                        return;
+                    }
+
+                    const fragment = document.createDocumentFragment();
+
+                    result.data.forEach(item => {
+                        const amountNum = parseFloat(item.Amount) || 0;
+                        totalSum += amountNum;
+                        
+                        let receiptIconHtml = '';
+                        if (item.Receipt_Path && item.Receipt_Path.trim() !== '') {
+                            receiptIconHtml = `<button class="receipt-btn" onclick="openReceipt('${item.Receipt_Path}')" title="Переглянути чек">📄 Чек</button>`;
+                        }
+                        
+                        const displayDate = formatDateForDisplay(item.Date);
+                        const expId = item.Expense_ID;
+                        
+                        const card = document.createElement('div');
+                        card.className = 'expense-card';
+                        card.id = `expense-card-${expId}`;
+
+                        const safeName = (item.Expense_Name || '').replace(/'/g, "\\'");
+                        const safeCat = (item.Category || '').replace(/'/g, "\\'");
+
+                        card.innerHTML = `
+                            <div class="header">
+                                <span>${item.Expense_Name}</span>
+                                <span>${amountNum.toFixed(2)} грн</span>
+                            </div>
+                            <div class="details">
+                                <span>${displayDate} | ${item.Category}</span>
+                                ${receiptIconHtml}
+                            </div>
+                            <div class="card-actions">
+                                <button class="btn-sm" onclick="openForm('${expId}', '${item.Date}', ${amountNum}, '${safeName}', '${safeCat}', '${item.Receipt_Path || ''}')">✏️ Редагувати</button>
+                                <button class="btn-sm btn-danger" onclick="deleteExpense('${expId}')">🗑 Видалити</button>
+                            </div>
+                        `;
+
+                        fragment.appendChild(card);
+                    });
+
+                    list.innerHTML = '';
+                    list.appendChild(fragment);
+
+                    document.getElementById('total-header').innerText = `Витрати: ${totalSum.toFixed(2)} грн`;
+
+                    if (targetExpenseId) {
+                        const targetCard = document.getElementById(`expense-card-${targetExpenseId}`);
+                        if (targetCard) targetCard.style.animation = 'highlight 1.2s ease';
+                    }
+                })
+                .catch(err => {
+                    if (loadingIndicator) loadingIndicator.style.display = 'none';
+                    document.getElementById('expenses-list').innerHTML = '<div style="color:red; text-align:center; padding:20px;">Помилка завантаження даних.</div>';
+                });
+        }
+
+        function openReceipt(url) {
+            document.getElementById('receipt-image').src = url;
+            document.getElementById('receipt-external-link').href = url;
+            document.getElementById('receipt-modal').style.display = 'flex';
+        }
+
+        function closeReceipt() {
+            document.getElementById('receipt-modal').style.display = 'none';
+            document.getElementById('receipt-image').src = '';
+        }
+
+        function openForm(expenseId = '', date = '', amount = '', name = '', category = '', path = '') {
+            document.getElementById('f-expense-id').value = expenseId;
+            document.getElementById('f-date').value = formatDateForInput(date);
+            
+            if (amount !== '') {
+                const amountNum = parseFloat(amount) || 0;
+                const hryvnia = Math.floor(amountNum);
+                const kopeck = Math.round((amountNum - hryvnia) * 100);
+                document.getElementById('f-hryvnia').value = hryvnia;
+                document.getElementById('f-kopeck').value = kopeck.toString().padStart(2, '0');
+            } else {
+                document.getElementById('f-hryvnia').value = '';
+                document.getElementById('f-kopeck').value = '';
+            }
+
+            document.getElementById('f-name').value = name;
+            
+            const catSelect = document.getElementById('f-category');
+            let matchedOption = Array.from(catSelect.options).find(
+                opt => opt.value === category || opt.textContent.trim() === String(category).trim()
+            );
+            
+            if (matchedOption) {
+                catSelect.value = matchedOption.value;
+            } else if (category) {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                catSelect.appendChild(option);
+                catSelect.value = category;
+            } else {
+                catSelect.value = catSelect.options[0] ? catSelect.options[0].value : "";
+            }
+            
+            document.getElementById('f-path').value = path;
+            const fileInput = document.getElementById('f-file');
+            fileInput.value = '';
+            
+            if (path && path.trim() !== '') {
+                document.getElementById('receipt-preview-box').style.display = 'flex';
+                fileInput.style.display = 'none';
+            } else {
+                document.getElementById('receipt-preview-box').style.display = 'none';
+                fileInput.style.display = 'block';
+            }
+            
+            updateNavButtons(expenseId);
+            document.getElementById('form-title').innerText = expenseId ? 'Редагувати витрату' : 'Нова витрата';
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function removeAttachedReceipt() {
+            document.getElementById('f-path').value = '';
+            document.getElementById('receipt-preview-box').style.display = 'none';
+            document.getElementById('f-file').style.display = 'block';
+            document.getElementById('f-file').value = ''; 
+        }
+
+        function viewAttachedReceipt() {
+            const currentPath = document.getElementById('f-path').value;
+            if (currentPath) openReceipt(currentPath);
+        }
+
+        function closeForm() { document.getElementById('modal').style.display = 'none'; }
+
+        async function saveExpense() {
+            const fileInput = document.getElementById('f-file');
+            let currentPath = document.getElementById('f-path').value;
+            
+            if (fileInput.files.length > 0) {
+                const formData = new FormData();
+                formData.append("file", fileInput.files[0]);
+                try {
+                    const uploadRes = await fetch(`/api/upload/${userId}`, { method: "POST", body: formData });
+                    const uploadData = await uploadRes.json();
+                    if (uploadData.status === "ok") currentPath = uploadData.file_path;
+                } catch (err) {
+                    alert("Помилка під час завантаження чека.");
+                    return;
+                }
+            }
+
+            const expenseId = document.getElementById('f-expense-id').value;
+            const hryvnia = parseInt(document.getElementById('f-hryvnia').value) || 0;
+            const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
+            const totalAmount = hryvnia + (kopeck / 100);
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const msgId = urlParams.get('msg_id');
+            const selectedCategoryId = document.getElementById('f-category').value;
+
+            const payload = {
+                date: document.getElementById('f-date').value,
+                amount: totalAmount,
+                expense_name: document.getElementById('f-name').value,
+                category: selectedCategoryId,
+                file_path: currentPath,
+                msg_id: msgId ? parseInt(msgId) : null
+            };
+            
+            const method = expenseId ? 'PUT' : 'POST';
+            const url = expenseId ? `/api/expenses/${userId}/${expenseId}` : `/api/expenses/${userId}`;
+            
+            fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => {
+                if (!r.ok) { alert("Помилка збереження! Можливо, ви намагаєтеся відредагувати чужий запис."); return; }
+                closeForm(); 
+                loadExpenses(expenseId);
+                if (urlParams.get('draft') === '1') tg.close();
+            });
+        }
+
+        function deleteExpense(expenseId) {
+            if(confirm("Ви дійсно хочете видалити цей запис?")) {
+                fetch(`/api/expenses/${userId}/${expenseId}`, { method: 'DELETE' })
+                    .then(r => {
+                        if(!r.ok) alert("Помилка видалення!");
+                        loadExpenses();
+                    });
+            }
+        }
+
+        function openSettings() {
+            fetch(`/api/user/${userId}/center`)
+                .then(r => r.json())
+                .then(res => {
+                    document.getElementById('s-center').value = res.center || '';
+                    document.getElementById('settings-modal').style.display = 'block';
+                });
+        }
+
+        function saveSettings() {
+            const center = document.getElementById('s-center').value;
+            fetch(`/api/user/${userId}/center`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ center: center })
+            }).then(() => {
+                document.getElementById('settings-modal').style.display = 'none';
+                tg.showAlert("Назву центру оновлено!");
+            });
+        }
+
+        function updateNavButtons(expenseId) {
+            const navBox = document.getElementById('modal-nav-box');
+            const btnPrev = document.getElementById('btn-prev');
+            const btnNext = document.getElementById('btn-next');
+
+            if (!expenseId || allExpenses.length === 0) {
+                if (navBox) navBox.style.display = 'none';
+                currentEditIndex = -1;
+                return;
+            }
+
+            currentEditIndex = allExpenses.findIndex(item => String(item.Expense_ID) === String(expenseId));
+
+            if (currentEditIndex !== -1) {
+                if (navBox) navBox.style.display = 'flex';
+                btnPrev.disabled = (currentEditIndex <= 0);
+                btnNext.disabled = (currentEditIndex >= allExpenses.length - 1);
+            } else {
+                if (navBox) navBox.style.display = 'none';
+            }
+        }
+
+        function navExpense(direction) {
+            const newIdx = currentEditIndex + direction;
+            if (newIdx >= 0 && newIdx < allExpenses.length) {
+                const item = allExpenses[newIdx];
+                const amountNum = parseFloat(item.Amount) || 0;
+                openForm(item.Expense_ID, item.Date, amountNum, item.Expense_Name, item.Category, item.Receipt_Path || '');
+            }
+        }
+
+        // Керування персональними категоріями
+        let currentCategories = [];
+
+        function sortCategories(cats) {
+            return cats.sort((a, b) => {
+                const nameA = typeof a === 'object' ? (a.name || '') : String(a);
+                const nameB = typeof b === 'object' ? (b.name || '') : String(b);
+                if (nameA === 'Інше') return 1;
+                if (nameB === 'Інше') return -1;
+                return nameA.localeCompare(nameB, 'uk');
+            });
+        }
+
+        function loadCategories() {
+            if (!userId) return;
+            fetch(`/api/categories/${userId}`)
+                .then(response => response.json())
+                .then(result => {
+                    currentCategories = sortCategories(result.data || []);
+                    renderCategorySelectOptions();
+                    renderCategoriesListBox();
+                });
+        }
+
+        function renderCategorySelectOptions() {
+            const catSelect = document.getElementById('f-category');
+            if (!catSelect) return;
+            const currentVal = catSelect.value;
+            catSelect.innerHTML = '';
+            
+            currentCategories.forEach(cat => {
+                const catId = typeof cat === 'object' ? cat.id : cat;
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                const option = document.createElement('option');
+                option.value = catId;
+                option.textContent = catName;
+                catSelect.appendChild(option);
+            });
+
+            if (currentVal && Array.from(catSelect.options).some(opt => opt.value === currentVal)) {
+                catSelect.value = currentVal;
+            }
+        }
+
+        function openCategoriesModal() {
+            renderCategoriesListBox();
+            document.getElementById('categories-modal').style.display = 'block';
+        }
+
+        function renderCategoriesListBox(editingCat = null) {
+            const box = document.getElementById('categories-list-box');
+            if (!box) return;
+            box.innerHTML = '';
+            
+            currentCategories.forEach((cat) => {
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                const item = document.createElement('div');
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);';
+                
+                if (editingCat && editingCat === catName) {
+                    const safeOldName = catName.replace(/'/g, "\\'");
+                    item.innerHTML = `
+                        <input type="text" id="inline-edit-input" value="${catName.replace(/"/g, '&quot;')}" style="flex: 1; margin-right: 8px; padding: 4px 6px; margin-top: 0;" onkeydown="if(event.key==='Enter') saveInlineRename('${safeOldName}')">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn-sm" style="background-color: #4CAF50; color: white;" onclick="saveInlineRename('${safeOldName}')">💾</button>
+                            <button type="button" class="btn-sm btn-danger" onclick="renderCategoriesListBox()">❌</button>
+                        </div>
+                    `;
+                } else {
+                    let actionsHtml = '';
+                    if (catName !== 'Інше') {
+                        const safeName = catName.replace(/'/g, "\\'");
+                        actionsHtml = `
+                            <div style="display: flex; gap: 5px;">
+                                <button type="button" class="btn-sm" onclick="startInlineEdit('${safeName}')">✏️</button>
+                                <button type="button" class="btn-sm btn-danger" onclick="removeCategoryFromList('${safeName}')">🗑</button>
+                            </div>
+                        `;
+                    }
+                    item.innerHTML = `<span>${catName}</span>${actionsHtml}`;
+                }
+                
+                box.appendChild(item);
+            });
+        }
+
+        function startInlineEdit(catName) { renderCategoriesListBox(catName); }
+
+        function saveInlineRename(oldCat) {
+            const input = document.getElementById('inline-edit-input');
+            if (!input) return;
+            const newName = input.value.trim();
+            if (!newName || newName === oldCat) { renderCategoriesListBox(); return; }
+
+            fetch(`/api/categories/${userId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ old_category: oldCat, category: newName })
+            }).then(() => loadCategories());
+        }
+
+        function addCategoryToList() {
+            const input = document.getElementById('new-cat-input');
+            const newCat = input.value.trim();
+            if (!newCat) return;
+            input.value = '';
+
+            fetch(`/api/categories/${userId}/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCat })
+            }).then(() => loadCategories());
+        }
+
+        function removeCategoryFromList(catName) {
+            if (catName === 'Інше') return;
+            if (confirm(`Ви дійсно хочете видалити категорію "${catName}"?`)) {
+                fetch(`/api/categories/${userId}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: catName })
+                }).then(() => loadCategories());
+            }
+        }
+
+        // Старт та авто-відкриття чернетки з URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('draft') === '1') {
+            const d_date = urlParams.get('date') || '';
+            const d_amount = urlParams.get('amount') || '';
+            const d_name = urlParams.get('name') || '';
+            const d_category = urlParams.get('category') || '';
+            const d_path = urlParams.get('path') || '';
+            setTimeout(() => { openForm('', d_date, d_amount, d_name, d_category, d_path); }, 500);
+        }
+
+        if (userId) {
+            loadCategories();
+            loadExpenses();
+        } else {
+            loadExpenses(); // відобразить застереження про відсутність авторизації
+        }
+    </script>
+</body>
+</html>

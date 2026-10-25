@@ -1,0 +1,34 @@
+.aider*
+_old/
+.Trash-1000/
+
+
+# Секретні ключі та конфігурації
+credentials.json
+token.json
+client_secrets.json
+.env
+*.json
+
+# Виключення: якщо у вас є якийсь публічний json-файл, внесіть його окремо з '!'
+
+# Віртуальне середовище Python
+venv/
+.venv/
+env/
+
+# Кеш Python
+__pycache__/
+*.pyc
+
+# Локальні фотографії чеків
+receipts/
+
+# Локальна база статистики (якщо використовується)
+*.db
+*.sqlite3
+
+# Конфігурації IDE
+.vscode/
+.continue/
+
