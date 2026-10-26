@@ -447,10 +447,15 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
         
         # Шукаємо існуючий запис
         for i, row in enumerate(records):
-            if str(row.get('Telegram_ID', '')).strip() == str(user_id).strip() and \
-               str(row.get('Category_ID', '')).strip() == str(category_id).strip() and \
-               str(row.get('Month', '')).strip() == str(month).strip():
-                
+            row_uid_raw = row.get('Telegram_ID', '')
+            row_month_raw = row.get('Month', row.get('Month (YYYY-MM)', ''))
+            row_cat_id_raw = row.get('Category_ID', '')
+            
+            row_uid = str(row_uid_raw).strip()
+            row_month = parse_gsheets_date(row_month_raw)
+            row_cat_id = str(row_cat_id_raw).strip()
+            
+            if row_uid == str(user_id).strip() and row_cat_id == str(category_id).strip() and row_month == str(month).strip():
                 # Оновлюємо існуючий
                 row_num = i + 2
                 range_name = f"A{row_num}:F{row_num}"
@@ -518,6 +523,42 @@ async def debug_budgets(user_id: int, month: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+def parse_gsheets_date(value) -> str:
+    """
+    Конвертує числову дату Excel/Google Sheets (наприклад, 46296) 
+    або рядок у формат 'YYYY-MM'.
+    """
+    if value is None or value == '':
+        return ''
+        
+    # Якщо це число (формат дати Google Sheets)
+    if isinstance(value, (int, float)):
+        # Google Sheets/Excel починає відлік від 1899-12-30
+        try:
+            utc_days = float(value) - 25569
+            dt = datetime.fromtimestamp(utc_days * 86400)
+            return dt.strftime("%Y-%m")
+        except Exception:
+            pass
+            
+    # Якщо це рядок, що містить тільки число
+    val_str = str(value).strip()
+    if val_str.isdigit():
+        try:
+            utc_days = float(val_str) - 25569
+            dt = datetime.fromtimestamp(utc_days * 86400)
+            return dt.strftime("%Y-%m")
+        except Exception:
+            pass
+            
+    # Якщо це вже рядок дати
+    if '-' in val_str:
+        parts = val_str.split('-')
+        if len(parts) >= 2:
+            return f"{parts[0]}-{parts[1]}"
+            
+    return val_str
+
 async def get_user_budgets(user_id: int, month: str) -> dict:
     """
     Отримує заплановані бюджети користувача на вказаний місяць.
@@ -541,7 +582,7 @@ async def get_user_budgets(user_id: int, month: str) -> dict:
             row_month_raw = row.get('Month', row.get('Month (YYYY-MM)', ''))
             
             row_uid = str(row.get('Telegram_ID', '')).strip()
-            row_month = str(row_month_raw).strip()
+            row_month = parse_gsheets_date(row_month_raw)
             
             if row_uid == target_uid and row_month == target_month:
                 cat_id = str(row.get('Category_ID', '')).strip()
