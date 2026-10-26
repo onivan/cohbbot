@@ -474,16 +474,26 @@ async def get_user_budgets(user_id: int, month: str) -> dict:
     Повертає словник { category_id: amount }
     """
     if not budgets_sheet:
+        logging.warning("get_user_budgets: budgets_sheet is None")
         return {}
         
     try:
         records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
         budgets_map = {}
         
+        target_uid = str(user_id).strip()
+        target_month = str(month).strip()
+        
+        logging.info(f"get_user_budgets: looking for uid '{target_uid}', month '{target_month}' in {len(records)} records")
+        
         for row in records:
-            if str(row.get('Telegram_ID', '')).strip() == str(user_id).strip() and \
-               str(row.get('Month', '')).strip() == str(month).strip():
-               
+            # Шукаємо місяць незалежно від точної назви колонки ('Month' чи 'Month (YYYY-MM)')
+            row_month_raw = row.get('Month', row.get('Month (YYYY-MM)', ''))
+            
+            row_uid = str(row.get('Telegram_ID', '')).strip()
+            row_month = str(row_month_raw).strip()
+            
+            if row_uid == target_uid and row_month == target_month:
                 cat_id = str(row.get('Category_ID', '')).strip()
                 try:
                     amount = float(row.get('Amount', 0))
@@ -493,7 +503,8 @@ async def get_user_budgets(user_id: int, month: str) -> dict:
                 if cat_id:
                     budgets_map[cat_id] = amount
                     
+        logging.info(f"get_user_budgets: returning {budgets_map}")
         return budgets_map
     except Exception as e:
-        logging.error(f"Помилка отримання бюджетів: {e}")
+        logging.error(f"Помилка отримання бюджетів: {e}", exc_info=True)
         return {}

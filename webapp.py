@@ -118,6 +118,7 @@ async def get_all_users_admin(admin_id: int):
 async def get_budgets(user_id: int, month: str):
     """Отримує бюджети користувача на вказаний місяць."""
     budgets = await database.get_user_budgets(user_id, month)
+    logging.info(f"API get_budgets for user {user_id}, month {month} returned: {budgets}")
     return {"status": "ok", "data": budgets}
 
 @app.post("/api/admin/budgets")
