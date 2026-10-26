@@ -40,6 +40,12 @@ class CategoryActionData(BaseModel):
     category_id: Optional[str] = None
     sort_order: Optional[int] = 999
 
+class BudgetData(BaseModel):
+    target_user_id: int
+    month: str
+    category_id: str
+    amount: float
+
 
 @app.get("/")
 async def read_root(request: Request):
@@ -90,6 +96,42 @@ async def get_center(user_id: int):
 async def set_center(user_id: int, data: CenterData):
     await database.update_user_center(user_id, data.center)
     return {"status": "ok"}
+
+
+@app.get("/api/user/{user_id}/role")
+async def get_user_role(user_id: int):
+    u_info = database.users_cache.get(str(user_id), {})
+    return {
+        "status": "ok", 
+        "role": u_info.get("role", "user"),
+        "name": u_info.get("name", "Невідомо")
+    }
+
+@app.get("/api/admin/users")
+async def get_all_users_admin(admin_id: int):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    users = database.get_all_users()
+    return {"status": "ok", "data": users}
+
+@app.get("/api/budgets/{user_id}")
+async def get_budgets(user_id: int, month: str):
+    """Отримує бюджети користувача на вказаний місяць."""
+    budgets = await database.get_user_budgets(user_id, month)
+    return {"status": "ok", "data": budgets}
+
+@app.post("/api/admin/budgets")
+async def set_budget_admin(admin_id: int, data: BudgetData):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+        
+    budget_id = await database.set_user_budget(
+        data.target_user_id, 
+        data.category_id, 
+        data.month, 
+        data.amount
+    )
+    return {"status": "ok", "budget_id": budget_id}
 
 
 # ==========================================

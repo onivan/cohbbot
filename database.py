@@ -32,6 +32,12 @@ try:
 except Exception:
     api_logs_sheet = None
 
+# Підключаємо аркуш Budgets
+try:
+    budgets_sheet = sh.worksheet("Budgets")
+except gspread.exceptions.WorksheetNotFound:
+    budgets_sheet = None
+
 async def log_api_usage(user_id: int, user_name: str, input_tokens: int, output_tokens: int):
     """
     Записує статистику використання Gemini API у Google Таблицю
@@ -266,18 +272,18 @@ def load_users():
     for row in records:
         users_cache[str(row['Telegram_ID'])] = {
             'name': row.get('Name', 'Невідомо'),
-            'center': row.get('Center', 'МійЦентр')
+            'center': row.get('Center', 'МійЦентр'),
+            'role': row.get('Role', 'user')
         }
 
-
-async def add_user(user_id: int, name: str, center: str, date_str: str):
+async def add_user(user_id: int, name: str, center: str, date_str: str, role: str = 'user'):
     """Додає нового користувача в кеш та у таблицю Users."""
     await asyncio.to_thread(
         users_sheet.append_row, 
-        [str(user_id), name, center, date_str], 
+        [str(user_id), name, center, date_str, role], 
         value_input_option='USER_ENTERED'
     )
-    users_cache[str(user_id)] = {'name': name, 'center': center}
+    users_cache[str(user_id)] = {'name': name, 'center': center, 'role': role}
 
 
 async def update_user_center(user_id: int, new_center: str):
@@ -373,3 +379,121 @@ async def get_user_expenses(user_id: int):
             user_expenses.append(row_data)
     user_expenses.reverse()
     return user_expenses
+
+
+# ==========================================
+# 4. ДОДАТКОВІ ФУНКЦІЇ КОРИСТУВАЧІВ
+# ==========================================
+
+def is_admin(user_id: int) -> bool:
+    """Перевіряє, чи має користувач права адміністратора."""
+    u_info = users_cache.get(str(user_id), {})
+    return str(u_info.get('role', '')).strip().lower() == 'admin'
+
+def get_all_users() -> list:
+    """Повертає список усіх користувачів (для адміна)."""
+    users_list = []
+    for uid, info in users_cache.items():
+        users_list.append({
+            'user_id': uid,
+            'name': info.get('name', 'Невідомо'),
+            'center': info.get('center', 'Невідомо')
+        })
+    # Сортуємо за ім'ям
+    users_list.sort(key=lambda x: x['name'].lower())
+    return users_list
+
+# ==========================================
+# 5. БЮДЖЕТИ (BUDGETS)
+# ==========================================
+
+async def setup_budgets_sheet_if_needed():
+    """Створює колонки на аркуші Budgets, якщо він порожній."""
+    global budgets_sheet
+    if not budgets_sheet:
+        try:
+            budgets_sheet = await asyncio.to_thread(sh.add_worksheet, title="Budgets", rows="1000", cols="10")
+        except Exception as e:
+            logging.error(f"Помилка створення аркуша Budgets: {e}")
+            return
+            
+    try:
+        headers = await asyncio.to_thread(budgets_sheet.row_values, 1)
+        if not headers or "Budget_ID" not in headers:
+            await asyncio.to_thread(budgets_sheet.clear)
+            await asyncio.to_thread(
+                budgets_sheet.append_row, 
+                ["Budget_ID", "Telegram_ID", "Category_ID", "Month", "Amount", "Updated_At"], 
+                value_input_option='USER_ENTERED'
+            )
+    except Exception as e:
+        logging.error(f"Помилка ініціалізації заголовків Budgets: {e}")
+
+
+async def set_user_budget(user_id: int, category_id: str, month: str, amount: float):
+    """
+    Встановлює або оновлює бюджет для користувача на певну категорію і місяць.
+    month очікується у форматі 'YYYY-MM'.
+    """
+    await setup_budgets_sheet_if_needed()
+    if not budgets_sheet:
+        return None
+        
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    budget_id = f"bgt_{month}_{user_id}_{category_id}"
+    
+    try:
+        records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
+        
+        # Шукаємо існуючий запис
+        for i, row in enumerate(records):
+            if str(row.get('Telegram_ID', '')).strip() == str(user_id).strip() and \
+               str(row.get('Category_ID', '')).strip() == str(category_id).strip() and \
+               str(row.get('Month', '')).strip() == str(month).strip():
+                
+                # Оновлюємо існуючий
+                row_num = i + 2
+                range_name = f"A{row_num}:F{row_num}"
+                row_data = [budget_id, str(user_id), category_id, month, amount, now_str]
+                await asyncio.to_thread(budgets_sheet.update, values=[row_data], range_name=range_name, value_input_option='USER_ENTERED')
+                return budget_id
+                
+        # Якщо не знайдено, додаємо новий
+        row_data = [budget_id, str(user_id), category_id, month, amount, now_str]
+        await asyncio.to_thread(budgets_sheet.append_row, row_data, value_input_option='USER_ENTERED')
+        return budget_id
+        
+    except Exception as e:
+        logging.error(f"Помилка встановлення бюджету: {e}")
+        raise HTTPException(status_code=500, detail="Помилка збереження бюджету")
+
+
+async def get_user_budgets(user_id: int, month: str) -> dict:
+    """
+    Отримує заплановані бюджети користувача на вказаний місяць.
+    Повертає словник { category_id: amount }
+    """
+    if not budgets_sheet:
+        return {}
+        
+    try:
+        records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
+        budgets_map = {}
+        
+        for row in records:
+            if str(row.get('Telegram_ID', '')).strip() == str(user_id).strip() and \
+               str(row.get('Month', '')).strip() == str(month).strip():
+               
+                cat_id = str(row.get('Category_ID', '')).strip()
+                try:
+                    amount = float(row.get('Amount', 0))
+                except (ValueError, TypeError):
+                    amount = 0.0
+                    
+                if cat_id:
+                    budgets_map[cat_id] = amount
+                    
+        return budgets_map
+    except Exception as e:
+        logging.error(f"Помилка отримання бюджетів: {e}")
+        return {}
