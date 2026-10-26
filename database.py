@@ -190,13 +190,17 @@ def build_category_formula(category_input: str, user_id: int = None) -> str:
     else:
         cat_id = get_category_id_by_name(cat_str, user_id)
 
-    formatted_id = cat_id if cat_id.isdigit() else f'"{cat_id}"'
-    
     # Динамічно шукаємо колонки "Category_ID" та "Category"
     col_id = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
     col_name = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
     
-    return f'=XLOOKUP({formatted_id}; Categories!{col_id}:{col_id}; Categories!{col_name}:{col_name}; "Інше")'
+    # Визначаємо колонку Category_ID на аркуші Expenses
+    try:
+        expenses_cat_id_col = get_col_letter_sync(expenses_sheet, "Expenses", "Category_ID", "F")
+    except Exception:
+        expenses_cat_id_col = "F"
+        
+    return f'=XLOOKUP(INDIRECT("{expenses_cat_id_col}"&ROW()); Categories!{col_id}:{col_id}; Categories!{col_name}:{col_name}; "Інше")'
 
 
 async def add_user_category(user_id: int, category_name: str, sort_order: int = 999):
@@ -484,8 +488,12 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
     c_id_col = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
     c_name_col = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
     
-    user_formula = f'=XLOOKUP("{user_id}"; Users!{u_id_col}:{u_id_col}; Users!{u_name_col}:{u_name_col}; "Невідомо")'
-    cat_formula = f'=XLOOKUP("{category_id}"; Categories!{c_id_col}:{c_id_col}; Categories!{c_name_col}:{c_name_col}; "Невідомо")'
+    # Колонки на поточному аркуші Budgets
+    b_uid_col = get_col_letter_sync(budgets_sheet, "Budgets", "Telegram_ID", "B")
+    b_cat_col = get_col_letter_sync(budgets_sheet, "Budgets", "Category_ID", "D")
+    
+    user_formula = f'=XLOOKUP(INDIRECT("{b_uid_col}"&ROW()); Users!{u_id_col}:{u_id_col}; Users!{u_name_col}:{u_name_col}; "Невідомо")'
+    cat_formula = f'=XLOOKUP(INDIRECT("{b_cat_col}"&ROW()); Categories!{c_id_col}:{c_id_col}; Categories!{c_name_col}:{c_name_col}; "Невідомо")'
     
     try:
         records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
