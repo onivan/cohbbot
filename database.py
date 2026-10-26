@@ -38,6 +38,36 @@ try:
 except gspread.exceptions.WorksheetNotFound:
     budgets_sheet = None
 
+# ==========================================
+# 0. КЕШ ТА ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ КОЛОНОК
+# ==========================================
+
+COL_MAPPING_CACHE = {}
+
+def get_column_letter(col_idx: int) -> str:
+    """Конвертує індекс колонки (починаючи з 0) у літеру (0 -> A, 1 -> B, 26 -> AA)."""
+    result = ""
+    col_idx += 1
+    while col_idx > 0:
+        col_idx, remainder = divmod(col_idx - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+def get_col_letter_sync(sheet_obj, sheet_name: str, header_name: str, default_letter: str) -> str:
+    """Синхронно отримує літеру колонки за її назвою (з кешуванням)."""
+    if sheet_obj is None:
+        return default_letter
+        
+    if sheet_name not in COL_MAPPING_CACHE:
+        try:
+            headers = sheet_obj.row_values(1)
+            COL_MAPPING_CACHE[sheet_name] = {str(h).strip(): get_column_letter(i) for i, h in enumerate(headers)}
+        except Exception as e:
+            logging.error(f"Помилка отримання заголовків для {sheet_name}: {e}")
+            return default_letter
+            
+    return COL_MAPPING_CACHE[sheet_name].get(str(header_name).strip(), default_letter)
+
 async def log_api_usage(user_id: int, user_name: str, input_tokens: int, output_tokens: int):
     """
     Записує статистику використання Gemini API у Google Таблицю
@@ -161,7 +191,12 @@ def build_category_formula(category_input: str, user_id: int = None) -> str:
         cat_id = get_category_id_by_name(cat_str, user_id)
 
     formatted_id = cat_id if cat_id.isdigit() else f'"{cat_id}"'
-    return f'=XLOOKUP({formatted_id}; Categories!A:A; Categories!C:C; "Інше")'
+    
+    # Динамічно шукаємо колонки "Category_ID" та "Category"
+    col_id = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
+    col_name = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
+    
+    return f'=XLOOKUP({formatted_id}; Categories!{col_id}:{col_id}; Categories!{col_name}:{col_name}; "Інше")'
 
 
 async def add_user_category(user_id: int, category_name: str, sort_order: int = 999):
@@ -442,11 +477,15 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     budget_id = f"bgt_{month}_{user_id}_{category_id}"
     
-    # Формули для отримання імен через XLOOKUP
-    # Users!A:A - Telegram_ID, Users!B:B - Name
-    user_formula = f'=XLOOKUP("{user_id}"; Users!A:A; Users!B:B; "Невідомо")'
-    # Categories!A:A - Category_ID, Categories!C:C - Category Name
-    cat_formula = f'=XLOOKUP("{category_id}"; Categories!A:A; Categories!C:C; "Невідомо")'
+    # Динамічне визначення колонок для XLOOKUP
+    u_id_col = get_col_letter_sync(users_sheet, "Users", "Telegram_ID", "A")
+    u_name_col = get_col_letter_sync(users_sheet, "Users", "Name", "B")
+    
+    c_id_col = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
+    c_name_col = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
+    
+    user_formula = f'=XLOOKUP("{user_id}"; Users!{u_id_col}:{u_id_col}; Users!{u_name_col}:{u_name_col}; "Невідомо")'
+    cat_formula = f'=XLOOKUP("{category_id}"; Categories!{c_id_col}:{c_id_col}; Categories!{c_name_col}:{c_name_col}; "Невідомо")'
     
     try:
         records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
