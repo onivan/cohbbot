@@ -142,7 +142,7 @@ async def create_expense(user_id: int, data: ExpenseData):
     # Видалення повідомлення в боті після швидкого збереження чернетки
     if data.msg_id:
         try:
-            from handlers import bot, dp
+            from bot_setup import bot, dp
             from aiogram.fsm.context import FSMContext
             from aiogram.fsm.storage.base import StorageKey
             await bot.delete_message(chat_id=user_id, message_id=data.msg_id)
