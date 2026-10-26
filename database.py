@@ -472,14 +472,36 @@ async def delete_expense(expense_id: str, user_id: int):
 async def get_user_expenses(user_id: int):
     """
     Отримує витрати ТІЛЬКИ вказаного користувача user_id разом із їх Expense_ID.
+    Використовує Category_ID для отримання назви категорії з актуального списку категорій.
     """
+    # Читаємо сирі дані (UNFORMATTED_VALUE)
     records = await asyncio.to_thread(expenses_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
+    
+    # Отримуємо мапінг категорій {id: name} для цього користувача
+    user_cats = await asyncio.to_thread(get_categories, user_id)
+    cat_map = {str(c['id']).strip(): c['name'] for c in user_cats}
+    
     user_expenses = []
     for i, row in enumerate(records):
         if str(row.get('Telegram_ID', '')).strip() == str(user_id).strip():
             row_data = dict(row)
+            
+            # Отримуємо ID категорії з таблиці
+            cat_id = str(row.get('Category_ID', '')).strip()
+            
+            # Встановлюємо назву категорії: беремо з мапінгу або пишемо "Інше"
+            # Це гарантує, що фронтенд отримає текст, а не формулу чи undefined
+            row_data['category_name'] = cat_map.get(cat_id, row.get('Category_Name', 'Інше'))
+            
+            # Забезпечуємо наявність ключів у нижньому регістрі для фронтенду
+            row_data['expense_id'] = row.get('Expense_ID', '')
+            row_data['expense_name'] = row.get('Expense_Name', '')
+            row_data['amount'] = row.get('Amount', 0)
+            row_data['date'] = row.get('Date', '')
+            
             row_data['row_num'] = i + 2 
             user_expenses.append(row_data)
+            
     user_expenses.reverse()
     return user_expenses
 
@@ -650,29 +672,35 @@ def parse_gsheets_date(value) -> str:
         
     # Якщо це число (формат дати Google Sheets)
     if isinstance(value, (int, float)):
-        # Google Sheets/Excel починає відлік від 1899-12-30
         try:
-            utc_days = float(value) - 25569
-            dt = datetime.fromtimestamp(utc_days * 86400)
+            from datetime import timedelta
+            base_date = datetime(1899, 12, 30)
+            dt = base_date + timedelta(days=float(value))
             return dt.strftime("%Y-%m")
         except Exception:
             pass
             
     # Якщо це рядок, що містить тільки число
     val_str = str(value).strip()
-    if val_str.isdigit():
+    if val_str.replace('.', '').isdigit():
         try:
-            utc_days = float(val_str) - 25569
-            dt = datetime.fromtimestamp(utc_days * 86400)
+            from datetime import timedelta
+            base_date = datetime(1899, 12, 30)
+            dt = base_date + timedelta(days=float(val_str))
             return dt.strftime("%Y-%m")
         except Exception:
             pass
             
-    # Якщо це вже рядок дати
+    # Спроба нормалізації рядка "YYYY-MM"
     if '-' in val_str:
         parts = val_str.split('-')
         if len(parts) >= 2:
-            return f"{parts[0]}-{parts[1]}"
+            try:
+                year = parts[0]
+                month = parts[1].zfill(2)
+                return f"{year}-{month[:2]}"
+            except:
+                pass
             
     return val_str
 

@@ -298,13 +298,13 @@
                     const budgets = budgetRes.data || {};
                     
                     // Виводимо дебаг в панель (можна розкоментувати за потреби)
-                    /*
+                    
                     const debugPanel = document.getElementById('budget-debug-panel');
                     if (debugPanel) {
                         debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
                         debugPanel.style.display = 'block';
                     }
-                    */
+                    
                     
                     // Обчислюємо фактичні витрати за обраний місяць
                     const expensesByCat = {};
@@ -441,13 +441,13 @@
                 const targetExpenses = expRes.data || [];
                 
                 // Виводимо дебаг в панель адміна (можна розкоментувати за потреби)
-                /*
+                
                 const debugPanel = document.getElementById('admin-debug-panel');
                 if (debugPanel) {
                     debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
                     debugPanel.style.display = 'block';
                 }
-                */
+                
             
                 // Обчислюємо фактичні витрати обраного користувача
                 const expensesByCat = {};
