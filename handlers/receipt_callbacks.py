@@ -46,17 +46,12 @@ async def process_callback(callback_query: types.CallbackQuery, state: FSMContex
 
         category_name = data.get('category', 'Інше')
         
-        # Формуємо формулу XLOOKUP для відносної прив'язки категорії в Sheets
-        cat_id = await asyncio.to_thread(get_category_id_by_name, category_name, user_id)
-        category_formula = await asyncio.to_thread(build_category_formula, cat_id, user_id)
-
         row_data = [
             receipt_date, 
             user_id, 
-            user_name, 
             data['amount'], 
             data['expense_name'], 
-            category_formula,
+            category_name,
             data.get('file_path', '')
         ]
         

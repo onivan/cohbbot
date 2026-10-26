@@ -179,8 +179,8 @@ async def get_expenses(user_id: int):
 
 @app.post("/api/expenses/{user_id}")
 async def create_expense(user_id: int, data: ExpenseData):
-    u_info = database.users_cache.get(str(user_id), {'name': 'Web User'})
-    row_data = [data.date, str(user_id), u_info['name'], data.amount, data.expense_name, data.category, data.file_path]
+    # Очікується рядок: [date, user_id, amount, expense_name, category, file_path]
+    row_data = [data.date, str(user_id), data.amount, data.expense_name, data.category, data.file_path]
     expense_id = await database.add_expense(row_data)
     
     # Видалення повідомлення в боті після швидкого збереження чернетки
@@ -200,8 +200,7 @@ async def create_expense(user_id: int, data: ExpenseData):
 
 @app.put("/api/expenses/{user_id}/{expense_id}")
 async def edit_expense(user_id: int, expense_id: str, data: ExpenseData):
-    u_info = database.users_cache.get(str(user_id), {'name': 'Web User'})
-    row_data = [data.date, str(user_id), u_info['name'], data.amount, data.expense_name, data.category, data.file_path]
+    row_data = [data.date, str(user_id), data.amount, data.expense_name, data.category, data.file_path]
     success = await database.update_expense(expense_id, user_id, row_data)
     if not success:
         raise HTTPException(status_code=404, detail="Запис не знайдено або немає доступу")

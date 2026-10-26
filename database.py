@@ -343,17 +343,52 @@ async def update_user_center(user_id: int, new_center: str):
 
 async def add_expense(row_data: list) -> str:
     """
-    Очікує row_data: [date, user_id, user_name, amount, expense_name, category_id_or_formula, file_path]
-    Генерує унікальний Expense_ID і додає його першим елементом у колонку A.
+    Очікує row_data: [date, user_id, amount, expense_name, category_id_or_name, file_path]
+    Генерує Expense_ID і формує рядок за структурою:
+    Expense_ID, Date, Telegram_ID, User_Name, Amount, Expense_Name, Category_ID, Category_Name, Receipt_Path
     """
     user_id = row_data[1]
-    category_val = str(row_data[5])
-    if not category_val.startswith('='):
-        row_data[5] = await asyncio.to_thread(build_category_formula, category_val, user_id)
+    
+    # Визначаємо Category_ID
+    category_input = str(row_data[4]).strip()
+    cats = get_categories(user_id)
+    existing_ids = [str(c['id']).strip() for c in cats]
+    
+    if category_input in existing_ids:
+        cat_id = category_input
+    else:
+        cat_id = get_category_id_by_name(category_input, user_id)
+
+    # Динамічне визначення колонок для XLOOKUP
+    u_id_col = get_col_letter_sync(users_sheet, "Users", "Telegram_ID", "A")
+    u_name_col = get_col_letter_sync(users_sheet, "Users", "Name", "B")
+    
+    c_id_col = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
+    c_name_col = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
+    
+    # Визначаємо колонки на аркуші Expenses
+    e_uid_col = get_col_letter_sync(expenses_sheet, "Expenses", "Telegram_ID", "C")
+    e_cat_col = get_col_letter_sync(expenses_sheet, "Expenses", "Category_ID", "G")
+    
+    user_formula = f'=XLOOKUP(INDIRECT("{e_uid_col}"&ROW()); Users!{u_id_col}:{u_id_col}; Users!{u_name_col}:{u_name_col}; "Невідомо")'
+    cat_formula = f'=XLOOKUP(INDIRECT("{e_cat_col}"&ROW()); Categories!{c_id_col}:{c_id_col}; Categories!{c_name_col}:{c_name_col}; "Інше")'
 
     timestamp_ms = int(time.time() * 1000)
     expense_id = f"exp_{timestamp_ms}_{user_id}_{uuid.uuid4().hex[:4]}"
-    full_row = [expense_id] + row_data
+    
+    # Збираємо повний рядок
+    # date: row_data[0], user_id: row_data[1], amount: row_data[2], expense_name: row_data[3], file_path: row_data[5]
+    full_row = [
+        expense_id,           # 0
+        row_data[0],          # 1: Date
+        str(user_id),         # 2: Telegram_ID
+        user_formula,         # 3: User_Name
+        row_data[2],          # 4: Amount
+        row_data[3],          # 5: Expense_Name
+        cat_id,               # 6: Category_ID
+        cat_formula,          # 7: Category_Name
+        row_data[5]           # 8: Receipt_Path
+    ]
 
     await asyncio.to_thread(
         expenses_sheet.append_row, 
@@ -378,17 +413,46 @@ async def find_row_by_expense_id(expense_id: str, user_id: int):
 async def update_expense(expense_id: str, user_id: int, row_data: list):
     """
     Знаходить актуальний рядок за expense_id та user_id і оновлює його.
+    Очікує row_data: [date, user_id, amount, expense_name, category_id_or_name, file_path]
     """
     row_num = await find_row_by_expense_id(expense_id, user_id)
     if not row_num:
         raise HTTPException(status_code=403, detail="Запис не знайдено або доступ заборонено")
 
-    category_val = str(row_data[5])
-    if not category_val.startswith('='):
-        row_data[5] = await asyncio.to_thread(build_category_formula, category_val, user_id)
+    category_input = str(row_data[4]).strip()
+    cats = get_categories(user_id)
+    existing_ids = [str(c['id']).strip() for c in cats]
+    
+    if category_input in existing_ids:
+        cat_id = category_input
+    else:
+        cat_id = get_category_id_by_name(category_input, user_id)
 
-    full_row = [expense_id] + row_data
-    range_name = f"A{row_num}:H{row_num}"
+    u_id_col = get_col_letter_sync(users_sheet, "Users", "Telegram_ID", "A")
+    u_name_col = get_col_letter_sync(users_sheet, "Users", "Name", "B")
+    
+    c_id_col = get_col_letter_sync(categories_sheet, "Categories", "Category_ID", "A")
+    c_name_col = get_col_letter_sync(categories_sheet, "Categories", "Category", "C")
+    
+    e_uid_col = get_col_letter_sync(expenses_sheet, "Expenses", "Telegram_ID", "C")
+    e_cat_col = get_col_letter_sync(expenses_sheet, "Expenses", "Category_ID", "G")
+    
+    user_formula = f'=XLOOKUP(INDIRECT("{e_uid_col}"&ROW()); Users!{u_id_col}:{u_id_col}; Users!{u_name_col}:{u_name_col}; "Невідомо")'
+    cat_formula = f'=XLOOKUP(INDIRECT("{e_cat_col}"&ROW()); Categories!{c_id_col}:{c_id_col}; Categories!{c_name_col}:{c_name_col}; "Інше")'
+
+    full_row = [
+        expense_id,           # 0
+        row_data[0],          # 1: Date
+        str(user_id),         # 2: Telegram_ID
+        user_formula,         # 3: User_Name
+        row_data[2],          # 4: Amount
+        row_data[3],          # 5: Expense_Name
+        cat_id,               # 6: Category_ID
+        cat_formula,          # 7: Category_Name
+        row_data[5]           # 8: Receipt_Path
+    ]
+    
+    range_name = f"A{row_num}:I{row_num}"
     await asyncio.to_thread(expenses_sheet.update, values=[full_row], range_name=range_name, value_input_option='USER_ENTERED')
     return True
 
