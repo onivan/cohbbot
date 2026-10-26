@@ -145,7 +145,7 @@
                 Завантаження...
             </div>
             
-            <div id="budget-debug-panel" style="font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
+            <div id="budget-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Debug panel (waiting for data...)
             </div>
             
@@ -171,7 +171,7 @@
                 Оберіть користувача та місяць.
             </div>
             
-            <div id="admin-debug-panel" style="font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
+            <div id="admin-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Admin debug panel (waiting for data...)
             </div>
             
@@ -289,11 +289,14 @@
                 .then(budgetRes => {
                     const budgets = budgetRes.data || {};
                     
-                    // Виводимо дебаг в панель
+                    // Виводимо дебаг в панель (можна розкоментувати за потреби)
+                    /*
                     const debugPanel = document.getElementById('budget-debug-panel');
                     if (debugPanel) {
                         debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
+                        debugPanel.style.display = 'block';
                     }
+                    */
                     
                     // Обчислюємо фактичні витрати за обраний місяць
                     const expensesByCat = {};
@@ -430,11 +433,14 @@
                 const budgets = budgetRes.data || {};
                 const targetExpenses = expRes.data || [];
                 
-                // Виводимо дебаг в панель адміна
+                // Виводимо дебаг в панель адміна (можна розкоментувати за потреби)
+                /*
                 const debugPanel = document.getElementById('admin-debug-panel');
                 if (debugPanel) {
                     debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
+                    debugPanel.style.display = 'block';
                 }
+                */
             
                 // Обчислюємо фактичні витрати обраного користувача
                 const expensesByCat = {};
