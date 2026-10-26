@@ -443,7 +443,9 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
     budget_id = f"bgt_{month}_{user_id}_{category_id}"
     
     # Формули для отримання імен через XLOOKUP
-    user_formula = f'=XLOOKUP("{user_id}"; Users!B:B; Users!C:C; "Невідомо")'
+    # Users!A:A - Telegram_ID, Users!B:B - Name
+    user_formula = f'=XLOOKUP("{user_id}"; Users!A:A; Users!B:B; "Невідомо")'
+    # Categories!A:A - Category_ID, Categories!C:C - Category Name
     cat_formula = f'=XLOOKUP("{category_id}"; Categories!A:A; Categories!C:C; "Невідомо")'
     
     try:
