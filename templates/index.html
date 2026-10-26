@@ -276,6 +276,14 @@
             loadMyBudget();
         }
         
+        function getProgressBarColor(percent) {
+            if (percent <= 25) return '#4CAF50'; // Зелений (до 25%)
+            if (percent <= 50) return '#8BC34A'; // Світло-зелений (26-50%)
+            if (percent <= 75) return '#FFC107'; // Бурштиновий (51-75%)
+            if (percent <= 99) return '#FF9800'; // Помаранчевий (76-99%)
+            return '#F44336'; // Червоний (100% і більше)
+        }
+        
         function loadMyBudget() {
             const month = document.getElementById('my-budget-month').value;
             if (!month || !userId) return;
@@ -347,9 +355,7 @@
                         if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
                         else if (spent > 0) percent = 100; // Витрати без бюджету
                         
-                        let barColor = '#4CAF50'; // Зелений
-                        if (percent >= 100) barColor = '#F44336'; // Червоний
-                        else if (percent >= 80) barColor = '#FF9800'; // Жовтий
+                        let barColor = getProgressBarColor(percent);
                         
                         // Не показуємо категорію, якщо немає ні плану, ні витрат
                         if (planned === 0 && spent === 0) return;
@@ -376,6 +382,7 @@
                         // Додаємо підсумок
                         let totalPercent = 0;
                         if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                        let totalBarColor = getProgressBarColor(totalPercent);
                         
                         html += `
                             <hr style="border-top: 1px solid #ccc; margin: 15px 0;">
@@ -385,7 +392,7 @@
                                     <strong>${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
                                 </div>
                                 <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 10px; overflow: hidden;">
-                                    <div style="width: ${totalPercent}%; background: ${totalPercent >= 100 ? '#F44336' : (totalPercent >= 80 ? '#FF9800' : '#4CAF50')}; height: 100%;"></div>
+                                    <div style="width: ${totalPercent}%; background: ${totalBarColor}; height: 100%;"></div>
                                 </div>
                             </div>
                         `;
@@ -485,9 +492,7 @@
                     if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
                     else if (spent > 0) percent = 100;
                     
-                    let barColor = '#4CAF50';
-                    if (percent >= 100) barColor = '#F44336';
-                    else if (percent >= 80) barColor = '#FF9800';
+                    let barColor = getProgressBarColor(percent);
                     
                     html += `
                         <div style="margin-bottom: 15px; border-bottom: 1px solid var(--tg-theme-hint-color, #eee); padding-bottom: 10px;">
@@ -514,6 +519,7 @@
                 } else {
                     let totalPercent = 0;
                     if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                    let totalBarColor = getProgressBarColor(totalPercent);
                     
                     html += `
                         <div style="margin-top: 15px; padding-top: 10px;" id="admin-total-block" data-total-spent="${totalSpent}">
@@ -522,7 +528,7 @@
                                 <strong id="admin-total-text">${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
                             </div>
                             <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
-                                <div id="admin-total-bar" style="width: ${totalPercent}%; background: ${totalPercent >= 100 ? '#F44336' : (totalPercent >= 80 ? '#FF9800' : '#4CAF50')}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
+                                <div id="admin-total-bar" style="width: ${totalPercent}%; background: ${totalBarColor}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
                             </div>
                         </div>
                     `;
@@ -561,9 +567,7 @@
                 else if (spent > 0) percent = 100;
                 
                 bar.style.width = percent + '%';
-                if (percent >= 100) bar.style.backgroundColor = '#F44336';
-                else if (percent >= 80) bar.style.backgroundColor = '#FF9800';
-                else bar.style.backgroundColor = '#4CAF50';
+                bar.style.backgroundColor = getProgressBarColor(percent);
             }
             
             recalculateAdminTotals();
@@ -596,9 +600,7 @@
                 if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
                 
                 totalBar.style.width = totalPercent + '%';
-                if (totalPercent >= 100) totalBar.style.backgroundColor = '#F44336';
-                else if (totalPercent >= 80) totalBar.style.backgroundColor = '#FF9800';
-                else totalBar.style.backgroundColor = '#4CAF50';
+                totalBar.style.backgroundColor = getProgressBarColor(totalPercent);
             }
         }
         
