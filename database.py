@@ -423,7 +423,7 @@ async def setup_budgets_sheet_if_needed():
             await asyncio.to_thread(budgets_sheet.clear)
             await asyncio.to_thread(
                 budgets_sheet.append_row, 
-                ["Budget_ID", "Telegram_ID", "Category_ID", "Month", "Amount", "Updated_At"], 
+                ["Budget_ID", "Telegram_ID", "User_Name", "Category_ID", "Category_Name", "Month (YYYY-MM)", "Amount", "Updated_At"], 
                 value_input_option='USER_ENTERED'
             )
     except Exception as e:
@@ -442,6 +442,10 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     budget_id = f"bgt_{month}_{user_id}_{category_id}"
     
+    # Формули для отримання імен через XLOOKUP
+    user_formula = f'=XLOOKUP("{user_id}"; Users!B:B; Users!C:C; "Невідомо")'
+    cat_formula = f'=XLOOKUP("{category_id}"; Categories!A:A; Categories!C:C; "Невідомо")'
+    
     try:
         records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
         
@@ -458,13 +462,13 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
             if row_uid == str(user_id).strip() and row_cat_id == str(category_id).strip() and row_month == str(month).strip():
                 # Оновлюємо існуючий
                 row_num = i + 2
-                range_name = f"A{row_num}:F{row_num}"
-                row_data = [budget_id, str(user_id), category_id, month, amount, now_str]
+                range_name = f"A{row_num}:H{row_num}"
+                row_data = [budget_id, str(user_id), user_formula, category_id, cat_formula, month, amount, now_str]
                 await asyncio.to_thread(budgets_sheet.update, values=[row_data], range_name=range_name, value_input_option='USER_ENTERED')
                 return budget_id
                 
         # Якщо не знайдено, додаємо новий
-        row_data = [budget_id, str(user_id), category_id, month, amount, now_str]
+        row_data = [budget_id, str(user_id), user_formula, category_id, cat_formula, month, amount, now_str]
         await asyncio.to_thread(budgets_sheet.append_row, row_data, value_input_option='USER_ENTERED')
         return budget_id
         
