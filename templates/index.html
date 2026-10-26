@@ -280,7 +280,7 @@
             if (percent <= 25) return '#4CAF50'; // Зелений (до 25%)
             if (percent <= 50) return '#8BC34A'; // Світло-зелений (26-50%)
             if (percent <= 75) return '#FFC107'; // Бурштиновий (51-75%)
-            if (percent <= 99) return '#FF9800'; // Помаранчевий (76-99%)
+            if (percent <= 99) return '#FF9800'; // Помаравневий (76-99%)
             return '#F44336'; // Червоний (100% і більше)
         }
         
@@ -636,7 +636,7 @@
                 
                 document.getElementById('expenses-list').innerHTML = 
                     '<div style="color: red; text-align: center; padding: 20px;">' +
-                    '⚠️ Авторизація недійсний.<br><br>' +
+                    '⚠️ Авторизація недійсна.<br><br>' +
                     '<div style="color: black; text-align: left; font-size: 12px; background: #eee; padding: 10px; border-radius: 5px; overflow-x: auto;">' +
                     '<b>URL:</b><br>' + currentUrl + '<br><br>' +
                     '<b>Full Debug Data:</b><br><pre>' + debugDataFull + '</pre>' +
@@ -690,6 +690,9 @@
 
                         const safeName = (item.Expense_Name || '').replace(/'/g, "\\'");
                         const safeCat = (item.Category || '').replace(/'/g, "\\'");
+                        
+                        // ДІАГНОСТИЧНИЙ ВИВІД (можна видалити після виправлення)
+                        const debugInfo = `<div style="font-size: 0.6em; color: #aaa; margin-top: 5px; border-top: 1px dashed #eee; padding-top: 3px;">ID: ${item.Category_ID || 'null'} | Name_in_Sheet: ${item.Category_Name || 'null'} | Final: ${item.category_name || 'null'}</div>`;
 
                         card.innerHTML = `
                             <div class="header">
@@ -697,9 +700,10 @@
                                 <span>${amountNum.toFixed(2)} грн</span>
                             </div>
                             <div class="details">
-                                <span>${displayDate} | ${item.Category}</span>
+                                <span>${displayDate} | ${item.category_name || item.Category || 'Інше'}</span>
                                 ${receiptIconHtml}
                             </div>
+                            ${debugInfo}
                             <div class="card-actions">
                                 <button class="btn-sm" onclick="openForm('${expId}', '${item.Date}', ${amountNum}, '${safeName}', '${safeCat}', '${item.Receipt_Path || ''}')">✏️ Редагувати</button>
                                 <button class="btn-sm btn-danger" onclick="deleteExpense('${expId}')">🗑 Видалити</button>
