@@ -494,16 +494,16 @@
                             <div style="display: flex; align-items: center; margin-bottom: 5px; gap: 10px;">
                                 <div style="flex: 2; font-weight: bold; font-size: 0.9em;">${catName}</div>
                                 <div style="flex: 1; display: flex; align-items: center; justify-content: flex-end;">
-                                    <input type="number" id="budget-input-${catId}" value="${planned || ''}" placeholder="0" style="width: 70px; text-align: right; margin: 0; padding: 4px;">
+                                    <input type="number" id="budget-input-${catId}" value="${planned || ''}" placeholder="0" style="width: 70px; text-align: right; margin: 0; padding: 4px;" oninput="updateAdminBudgetPreview('${catId}', ${spent})">
                                 </div>
                                 <button class="btn-sm" style="background-color: #4CAF50; padding: 4px 8px;" onclick="saveAdminBudget('${targetUserId}', '${catId}', '${month}')">💾</button>
                             </div>
                             <div style="display: flex; justify-content: space-between; font-size: 0.8em; margin-bottom: 4px; color: var(--tg-theme-hint-color, #888);">
                                 <span>Витрачено: ${spent.toFixed(0)} грн</span>
-                                <span style="color: ${remaining < 0 ? '#F44336' : ''};">${remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) : 'Залишок: ' + remaining.toFixed(0)} грн</span>
+                                <span id="budget-remaining-${catId}" style="color: ${remaining < 0 ? '#F44336' : ''};">${remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) : 'Залишок: ' + remaining.toFixed(0)} грн</span>
                             </div>
                             <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 6px; overflow: hidden;">
-                                <div style="width: ${percent}%; background: ${barColor}; height: 100%;"></div>
+                                <div id="budget-bar-${catId}" style="width: ${percent}%; background: ${barColor}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
                             </div>
                         </div>
                     `;
@@ -516,13 +516,13 @@
                     if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
                     
                     html += `
-                        <div style="margin-top: 15px; padding-top: 10px;">
+                        <div style="margin-top: 15px; padding-top: 10px;" id="admin-total-block" data-total-spent="${totalSpent}">
                             <div style="display: flex; justify-content: space-between; font-size: 1em; margin-bottom: 4px;">
                                 <strong>ВСЬОГО</strong>
-                                <strong>${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
+                                <strong id="admin-total-text">${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
                             </div>
                             <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
-                                <div style="width: ${totalPercent}%; background: ${totalPercent >= 100 ? '#F44336' : (totalPercent >= 80 ? '#FF9800' : '#4CAF50')}; height: 100%;"></div>
+                                <div id="admin-total-bar" style="width: ${totalPercent}%; background: ${totalPercent >= 100 ? '#F44336' : (totalPercent >= 80 ? '#FF9800' : '#4CAF50')}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
                             </div>
                         </div>
                     `;
@@ -533,6 +533,73 @@
                 list.innerHTML = 'Помилка завантаження даних.';
                 console.error(err);
             });
+        }
+        
+        function updateAdminBudgetPreview(catId, spent) {
+            const input = document.getElementById(`budget-input-${catId}`);
+            if (!input) return;
+            
+            let planned = parseFloat(input.value);
+            if (isNaN(planned) || planned < 0) planned = 0;
+            
+            const remaining = planned - spent;
+            const remainingSpan = document.getElementById(`budget-remaining-${catId}`);
+            if (remainingSpan) {
+                if (remaining < 0) {
+                    remainingSpan.textContent = 'Перевитрата: ' + Math.abs(remaining).toFixed(0) + ' грн';
+                    remainingSpan.style.color = '#F44336';
+                } else {
+                    remainingSpan.textContent = 'Залишок: ' + remaining.toFixed(0) + ' грн';
+                    remainingSpan.style.color = '';
+                }
+            }
+            
+            const bar = document.getElementById(`budget-bar-${catId}`);
+            if (bar) {
+                let percent = 0;
+                if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
+                else if (spent > 0) percent = 100;
+                
+                bar.style.width = percent + '%';
+                if (percent >= 100) bar.style.backgroundColor = '#F44336';
+                else if (percent >= 80) bar.style.backgroundColor = '#FF9800';
+                else bar.style.backgroundColor = '#4CAF50';
+            }
+            
+            recalculateAdminTotals();
+        }
+        
+        function recalculateAdminTotals() {
+            const totalBlock = document.getElementById('admin-total-block');
+            if (!totalBlock) return;
+            
+            const totalSpent = parseFloat(totalBlock.getAttribute('data-total-spent')) || 0;
+            let totalPlanned = 0;
+            
+            // Збираємо суми з усіх інпутів бюджету
+            const inputs = document.querySelectorAll('[id^="budget-input-"]');
+            inputs.forEach(input => {
+                let val = parseFloat(input.value);
+                if (!isNaN(val) && val > 0) {
+                    totalPlanned += val;
+                }
+            });
+            
+            const totalText = document.getElementById('admin-total-text');
+            if (totalText) {
+                totalText.textContent = `${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн`;
+            }
+            
+            const totalBar = document.getElementById('admin-total-bar');
+            if (totalBar) {
+                let totalPercent = 0;
+                if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                
+                totalBar.style.width = totalPercent + '%';
+                if (totalPercent >= 100) totalBar.style.backgroundColor = '#F44336';
+                else if (totalPercent >= 80) totalBar.style.backgroundColor = '#FF9800';
+                else totalBar.style.backgroundColor = '#4CAF50';
+            }
         }
         
         function saveAdminBudget(targetUserId, categoryId, month) {
