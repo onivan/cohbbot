@@ -468,6 +468,56 @@ async def set_user_budget(user_id: int, category_id: str, month: str, amount: fl
         raise HTTPException(status_code=500, detail="Помилка збереження бюджету")
 
 
+async def debug_budgets(user_id: int, month: str) -> dict:
+    """Діагностична функція для перевірки, що саме бачить gspread у таблиці."""
+    if not budgets_sheet:
+        return {"error": "budgets_sheet is None"}
+    
+    try:
+        records = await asyncio.to_thread(budgets_sheet.get_all_records, value_render_option='UNFORMATTED_VALUE')
+        if not records:
+            return {"error": "No records found in Budgets sheet", "headers_seen": None}
+            
+        target_uid = str(user_id).strip()
+        target_month = str(month).strip()
+        
+        debug_info = {
+            "headers_in_first_row": list(records[0].keys()),
+            "target_uid": target_uid,
+            "target_month": target_month,
+            "first_row_raw": records[0],
+            "matches_found": []
+        }
+        
+        for i, row in enumerate(records):
+            # Перевіряємо всі можливі ключі, щоб знайти правильний незалежно від пробілів
+            keys = list(row.keys())
+            
+            # Спроба знайти значення
+            row_uid_raw = row.get('Telegram_ID', '')
+            row_month_raw = row.get('Month', row.get('Month (YYYY-MM)', ''))
+            row_cat_raw = row.get('Category_ID', '')
+            
+            row_uid = str(row_uid_raw).strip()
+            row_month = str(row_month_raw).strip()
+            
+            # Якщо Telegram ID збігається, записуємо це в логи
+            if row_uid == target_uid:
+                debug_info["matches_found"].append({
+                    "row_index": i + 2,
+                    "raw_uid": row_uid_raw,
+                    "parsed_uid": row_uid,
+                    "raw_month": row_month_raw,
+                    "parsed_month": row_month,
+                    "month_match": row_month == target_month,
+                    "cat_id": str(row_cat_raw).strip(),
+                    "amount": row.get('Amount', None)
+                })
+                
+        return debug_info
+    except Exception as e:
+        return {"error": str(e)}
+
 async def get_user_budgets(user_id: int, month: str) -> dict:
     """
     Отримує заплановані бюджети користувача на вказаний місяць.

@@ -145,6 +145,10 @@
                 Завантаження...
             </div>
             
+            <div id="budget-debug-panel" style="font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
+                Debug panel (waiting for data...)
+            </div>
+            
             <div style="display: flex; justify-content: flex-end;">
                 <button onclick="document.getElementById('my-budget-modal').style.display='none'">Закрити</button>
             </div>
@@ -165,6 +169,10 @@
             
             <div id="admin-budget-list" style="max-height: 350px; overflow-y: auto; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
                 Оберіть користувача та місяць.
+            </div>
+            
+            <div id="admin-debug-panel" style="font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
+                Admin debug panel (waiting for data...)
             </div>
             
             <div style="display: flex; justify-content: flex-end;">
@@ -280,6 +288,12 @@
                 .then(r => r.json())
                 .then(budgetRes => {
                     const budgets = budgetRes.data || {};
+                    
+                    // Виводимо дебаг в панель
+                    const debugPanel = document.getElementById('budget-debug-panel');
+                    if (debugPanel) {
+                        debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
+                    }
                     
                     // Обчислюємо фактичні витрати за обраний місяць
                     const expensesByCat = {};
@@ -410,12 +424,18 @@
                 fetch(`/api/categories/${targetUserId}`).then(r => r.json()),
                 fetch(`/api/budgets/${targetUserId}?month=${month}`).then(r => r.json()),
                 fetch(`/api/expenses/${targetUserId}`).then(r => r.json())
-            ])
-            .then(([catRes, budgetRes, expRes]) => {
+        ])
+        .then(([catRes, budgetRes, expRes]) => {
                 const userCats = sortCategories(catRes.data || []);
                 const budgets = budgetRes.data || {};
                 const targetExpenses = expRes.data || [];
                 
+                // Виводимо дебаг в панель адміна
+                const debugPanel = document.getElementById('admin-debug-panel');
+                if (debugPanel) {
+                    debugPanel.textContent = JSON.stringify(budgetRes._debug || "No debug info", null, 2);
+                }
+            
                 // Обчислюємо фактичні витрати обраного користувача
                 const expensesByCat = {};
                 let totalSpent = 0;
