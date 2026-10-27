@@ -70,22 +70,30 @@ async def fetch_user_categories(user_id: int):
     return {"status": "ok", "data": categories}
 
 @app.post("/api/categories/{user_id}")
-async def update_user_categories(user_id: int, data: CategoriesData):
+async def update_user_categories(user_id: int, data: CategoriesData, admin_id: int):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.save_user_categories(user_id, data.categories)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/add")
-async def add_category_endpoint(user_id: int, data: CategoryActionData):
+async def add_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.add_user_category(user_id, data.category, data.sort_order)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/delete")
-async def delete_category_endpoint(user_id: int, data: CategoryActionData):
+async def delete_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.delete_user_category(user_id, data.category)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/rename")
-async def rename_category_endpoint(user_id: int, data: CategoryActionData):
+async def rename_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+    if not database.is_admin(admin_id):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
     if data.old_category:
         await database.rename_user_category(user_id, data.old_category, data.category)
     return {"status": "ok"}

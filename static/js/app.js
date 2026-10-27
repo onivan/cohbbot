@@ -69,14 +69,15 @@ function parseDate(rawDate) {
         
         let currentUserRole = 'user';
 
-        function checkUserRole() {
+                function checkUserRole() {
             if (!userId) return;
             fetch(`/api/user/${userId}/role`)
                 .then(r => r.json())
                 .then(res => {
                     currentUserRole = res.role;
                     if (currentUserRole === 'admin') {
-                        document.getElementById('btn-admin-budgets').style.display = 'inline-block';
+                        const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
+                        if (adminBtn) adminBtn.style.display = 'inline-block';
                         loadUsersForAdmin();
                     }
                 })
@@ -258,12 +259,201 @@ function parseDate(rawDate) {
                 });
         }
 
-        // ==========================================
-        // БЮДЖЕТИ (АДМІНІСТРАТОР)
+                // ==========================================
+        // ПАНЕЛЬ АДМІНІСТРАТОРА (БЮДЖЕТИ ТА КАТЕГОРІЇ)
         // ==========================================
 
-        function openAdminBudgetsModal() {
+        let adminCurrentTab = 'budgets';
+        let adminTargetCategories = [];
+
+        function openAdminModal() {
             document.getElementById('admin-budgets-modal').style.display = 'block';
+            onAdminUserChange();
+        }
+
+        function openAdminBudgetsModal() {
+            openAdminModal();
+        }
+
+        function closeAdminModal() {
+            document.getElementById('admin-budgets-modal').style.display = 'none';
+        }
+
+        function onAdminUserChange() {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            const actionsDiv = document.getElementById('admin-user-actions');
+            const tabBudgets = document.getElementById('admin-tab-budgets');
+            const tabCategories = document.getElementById('admin-tab-categories');
+            
+            if (!targetUserId) {
+                if (actionsDiv) actionsDiv.style.display = 'none';
+                if (tabBudgets) tabBudgets.style.display = 'none';
+                if (tabCategories) tabCategories.style.display = 'none';
+                return;
+            }
+
+            if (actionsDiv) actionsDiv.style.display = 'block';
+            switchAdminTab(adminCurrentTab);
+        }
+
+        function switchAdminTab(tabName) {
+            adminCurrentTab = tabName;
+            const tabBudgets = document.getElementById('admin-tab-budgets');
+            const tabCategories = document.getElementById('admin-tab-categories');
+            const btnBudgets = document.getElementById('tab-btn-budgets');
+            const btnCategories = document.getElementById('tab-btn-categories');
+
+            if (tabName === 'budgets') {
+                if (tabBudgets) tabBudgets.style.display = 'block';
+                if (tabCategories) tabCategories.style.display = 'none';
+                if (btnBudgets) { btnBudgets.style.background = '#4CAF50'; btnBudgets.style.opacity = '1'; }
+                if (btnCategories) { btnCategories.style.background = '#666'; btnCategories.style.opacity = '0.7'; }
+                loadAdminBudgetsForUser();
+            } else {
+                if (tabBudgets) tabBudgets.style.display = 'none';
+                if (tabCategories) tabCategories.style.display = 'block';
+                if (btnBudgets) { btnBudgets.style.background = '#666'; btnBudgets.style.opacity = '0.7'; }
+                if (btnCategories) { btnCategories.style.background = '#4CAF50'; btnCategories.style.opacity = '1'; }
+                loadAdminCategoriesForUser();
+            }
+        }
+
+        function loadAdminCategoriesForUser() {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            const listBox = document.getElementById('admin-categories-list-box');
+            if (!targetUserId) {
+                if (listBox) listBox.innerHTML = 'Оберіть користувача.';
+                return;
+            }
+
+            if (listBox) listBox.innerHTML = 'Завантаження категорій...';
+
+            fetch(`/api/categories/${targetUserId}`)
+                .then(r => r.json())
+                .then(res => {
+                    adminTargetCategories = sortCategories(res.data || []);
+                    renderAdminCategoriesListBox();
+                })
+                .catch(err => {
+                    if (listBox) listBox.innerHTML = 'Помилка завантаження категорій: ' + err.message;
+                });
+        }
+
+        function renderAdminCategoriesListBox(editingCat = null) {
+            const box = document.getElementById('admin-categories-list-box');
+            if (!box) return;
+            box.innerHTML = '';
+
+            if (adminTargetCategories.length === 0) {
+                box.innerHTML = '<div style="text-align:center; color:#888;">Категорій немає.</div>';
+                return;
+            }
+
+            adminTargetCategories.forEach((cat) => {
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                const item = document.createElement('div');
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);';
+
+                if (editingCat && editingCat === catName) {
+                    const safeOldName = catName.replace(/'/g, "\\'");
+                    item.innerHTML = `
+                        <input type="text" id="admin-inline-edit-input" value="${catName.replace(/"/g, '&quot;')}" style="flex: 1; margin-right: 8px; padding: 4px 6px; margin-top: 0;" onkeydown="if(event.key==='Enter') saveAdminCategoryRename('${safeOldName}')">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn-sm" style="background-color: #4CAF50; color: white;" onclick="saveAdminCategoryRename('${safeOldName}')">💾</button>
+                            <button type="button" class="btn-sm btn-danger" onclick="renderAdminCategoriesListBox()">❌</button>
+                        </div>
+                    `;
+                } else {
+                    let actionsHtml = '';
+                    if (catName !== 'Інше') {
+                        const safeName = catName.replace(/'/g, "\\'");
+                        actionsHtml = `
+                            <div style="display: flex; gap: 5px;">
+                                <button type="button" class="btn-sm" onclick="startAdminInlineEdit('${safeName}')">✏️</button>
+                                <button type="button" class="btn-sm btn-danger" onclick="removeAdminUserCategory('${safeName}')">🗑</button>
+                            </div>
+                        `;
+                    }
+                    item.innerHTML = `<span>${catName}</span>${actionsHtml}`;
+                }
+
+                box.appendChild(item);
+            });
+        }
+
+        function startAdminInlineEdit(catName) {
+            renderAdminCategoriesListBox(catName);
+        }
+
+        function saveAdminCategoryRename(oldCat) {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            const input = document.getElementById('admin-inline-edit-input');
+            if (!input || !targetUserId) return;
+            const newName = input.value.trim();
+            if (!newName || newName === oldCat) {
+                renderAdminCategoriesListBox();
+                return;
+            }
+
+            fetch(`/api/categories/${targetUserId}/rename?admin_id=${userId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ old_category: oldCat, category: newName })
+            }).then(r => {
+                if (!r.ok) {
+                    alert("Помилка перейменування категорії!");
+                    return;
+                }
+                loadAdminCategoriesForUser();
+                if (String(targetUserId) === String(userId)) {
+                    loadCategories();
+                }
+            });
+        }
+
+        function addAdminUserCategory() {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            const input = document.getElementById('admin-new-cat-input');
+            if (!input || !targetUserId) return;
+            const newCat = input.value.trim();
+            if (!newCat) return;
+            input.value = '';
+
+            fetch(`/api/categories/${targetUserId}/add?admin_id=${userId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCat })
+            }).then(r => {
+                if (!r.ok) {
+                    alert("Помилка додавання категорії!");
+                    return;
+                }
+                loadAdminCategoriesForUser();
+                if (String(targetUserId) === String(userId)) {
+                    loadCategories();
+                }
+            });
+        }
+
+        function removeAdminUserCategory(catName) {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            if (!targetUserId || catName === 'Інше') return;
+            if (confirm(`Ви дійсно хочете видалити категорію "${catName}" для обраного користувача?`)) {
+                fetch(`/api/categories/${targetUserId}/delete?admin_id=${userId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: catName })
+                }).then(r => {
+                    if (!r.ok) {
+                        alert("Помилка видалення категорії!");
+                        return;
+                    }
+                    loadAdminCategoriesForUser();
+                    if (String(targetUserId) === String(userId)) {
+                        loadCategories();
+                    }
+                });
+            }
         }
         
         function loadAdminBudgetsForUser() {
@@ -867,14 +1057,13 @@ function parseDate(rawDate) {
             });
         }
 
-        function loadCategories() {
+                function loadCategories() {
             if (!userId) return;
             fetch(`/api/categories/${userId}`)
                 .then(response => response.json())
                 .then(result => {
                     currentCategories = sortCategories(result.data || []);
                     renderCategorySelectOptions();
-                    renderCategoriesListBox();
                 });
         }
 
@@ -895,87 +1084,6 @@ function parseDate(rawDate) {
 
             if (currentVal && Array.from(catSelect.options).some(opt => opt.value === currentVal)) {
                 catSelect.value = currentVal;
-            }
-        }
-
-        function openCategoriesModal() {
-            renderCategoriesListBox();
-            document.getElementById('categories-modal').style.display = 'block';
-        }
-
-        function renderCategoriesListBox(editingCat = null) {
-            const box = document.getElementById('categories-list-box');
-            if (!box) return;
-            box.innerHTML = '';
-            
-            currentCategories.forEach((cat) => {
-                const catName = typeof cat === 'object' ? cat.name : cat;
-                const item = document.createElement('div');
-                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);';
-                
-                if (editingCat && editingCat === catName) {
-                    const safeOldName = catName.replace(/'/g, "\\'");
-                    item.innerHTML = `
-                        <input type="text" id="inline-edit-input" value="${catName.replace(/"/g, '&quot;')}" style="flex: 1; margin-right: 8px; padding: 4px 6px; margin-top: 0;" onkeydown="if(event.key==='Enter') saveInlineRename('${safeOldName}')">
-                        <div style="display: flex; gap: 5px;">
-                            <button type="button" class="btn-sm" style="background-color: #4CAF50; color: white;" onclick="saveInlineRename('${safeOldName}')">💾</button>
-                            <button type="button" class="btn-sm btn-danger" onclick="renderCategoriesListBox()">❌</button>
-                        </div>
-                    `;
-                } else {
-                    let actionsHtml = '';
-                    if (catName !== 'Інше') {
-                        const safeName = catName.replace(/'/g, "\\'");
-                        actionsHtml = `
-                            <div style="display: flex; gap: 5px;">
-                                <button type="button" class="btn-sm" onclick="startInlineEdit('${safeName}')">✏️</button>
-                                <button type="button" class="btn-sm btn-danger" onclick="removeCategoryFromList('${safeName}')">🗑</button>
-                            </div>
-                        `;
-                    }
-                    item.innerHTML = `<span>${catName}</span>${actionsHtml}`;
-                }
-                
-                box.appendChild(item);
-            });
-        }
-
-        function startInlineEdit(catName) { renderCategoriesListBox(catName); }
-
-        function saveInlineRename(oldCat) {
-            const input = document.getElementById('inline-edit-input');
-            if (!input) return;
-            const newName = input.value.trim();
-            if (!newName || newName === oldCat) { renderCategoriesListBox(); return; }
-
-            fetch(`/api/categories/${userId}/rename`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ old_category: oldCat, category: newName })
-            }).then(() => loadCategories());
-        }
-
-        function addCategoryToList() {
-            const input = document.getElementById('new-cat-input');
-            const newCat = input.value.trim();
-            if (!newCat) return;
-            input.value = '';
-
-            fetch(`/api/categories/${userId}/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ category: newCat })
-            }).then(() => loadCategories());
-        }
-
-        function removeCategoryFromList(catName) {
-            if (catName === 'Інше') return;
-            if (confirm(`Ви дійсно хочете видалити категорію "${catName}"?`)) {
-                fetch(`/api/categories/${userId}/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ category: catName })
-                }).then(() => loadCategories());
             }
         }
 

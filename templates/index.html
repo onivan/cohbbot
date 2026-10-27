@@ -15,11 +15,10 @@
 
     <h2 id="total-header" style="text-align: center; margin-top: 10px; margin-bottom: 15px; display: none;">Витрати: 0.00 грн</h2>
 
-    <div class="header-bar" style="display: flex; justify-content: space-between; gap: 5px; flex-wrap: wrap; margin-bottom: 15px;">
-        <button id="btn-admin-budgets" style="flex: 1; min-width: 80px; background: #9c27b0; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openAdminBudgetsModal()">🎯 Адмін</button>
+        <div class="header-bar" style="display: flex; justify-content: space-between; gap: 5px; flex-wrap: wrap; margin-bottom: 15px;">
+        <button id="btn-admin-panel" style="flex: 1; min-width: 80px; background: #9c27b0; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openAdminModal()">🎯 Адмін</button>
         <button id="btn-my-budget" style="flex: 1; min-width: 80px; background: #4CAF50; padding: 8px 4px; font-size: 0.85em;" onclick="openMyBudgetModal()">📊 Бюджет</button>
         <button style="flex: 1; min-width: 80px; background: #666; padding: 8px 4px; font-size: 0.85em;" onclick="openSettings()">⚙️ Центр</button>
-        <button style="flex: 1; min-width: 80px; background: #666; padding: 8px 4px; font-size: 0.85em;" onclick="openCategoriesModal()">🏷 Категорії</button>
         <button style="flex: 1; min-width: 80px; padding: 8px 4px; font-size: 0.85em;" onclick="openForm()">➕ Додати</button>
     </div>
     
@@ -99,20 +98,7 @@
         </div>
     </div>
 
-    <!-- Модальне вікно налаштування категорій -->
-    <div id="categories-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
-        <div class="modal-content" style="max-width: 400px; margin: 20px auto;">
-            <h3 style="margin-top: 0;">Мої категорії</h3>
-            <div id="categories-list-box" style="max-height: 250px; overflow-y: auto; margin-bottom: 15px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 8px;"></div>
-            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
-                <input type="text" id="new-cat-input" placeholder="Нова категорія" style="flex: 1; margin: 0;" onkeydown="if(event.key==='Enter') addCategoryToList()">
-                <button type="button" onclick="addCategoryToList()">➕ Додати</button>
-            </div>
-            <div style="display: flex; justify-content: flex-end;">
-                <button onclick="document.getElementById('categories-modal').style.display='none'">Закрити</button>
-            </div>
-        </div>
-    </div>
+    
 
     <!-- Модальне вікно "Мій бюджет" -->
     <div id="my-budget-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
@@ -137,20 +123,46 @@
         </div>
     </div>
 
-    <!-- Модальне вікно "Адміністратор Бюджетів" -->
+        <!-- Модальне вікно "Адміністратор" (Керування бюджетами та категоріями) -->
     <div id="admin-budgets-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
         <div class="modal-content" style="max-width: 500px; margin: 20px auto;">
-            <h3 style="margin-top: 0; margin-bottom: 15px;">Керування бюджетами</h3>
+            <h3 style="margin-top: 0; margin-bottom: 12px;">Панель адміністратора</h3>
             
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <select id="admin-user-select" style="flex: 1; max-width: 60%;" onchange="loadAdminBudgetsForUser()">
+            <div style="margin-bottom: 15px;">
+                <label for="admin-user-select" style="font-weight: bold; font-size: 0.9em; display: block; margin-bottom: 4px;">Оберіть користувача:</label>
+                <select id="admin-user-select" style="width: 100%; padding: 6px;" onchange="onAdminUserChange()">
                     <option value="">-- Оберіть користувача --</option>
                 </select>
-                <input type="month" id="admin-budget-month" style="flex: 1; max-width: 35%; padding: 4px;" onchange="loadAdminBudgetsForUser()">
+            </div>
+
+            <!-- Блок перемикання між Бюджетами та Категоріями для вибраного користувача -->
+            <div id="admin-user-actions" style="display: none; margin-bottom: 15px;">
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" id="tab-btn-budgets" class="btn-sm" style="flex: 1; padding: 8px; font-weight: bold; background: #4CAF50; color: white;" onclick="switchAdminTab('budgets')">📊 Керувати бюджетом</button>
+                    <button type="button" id="tab-btn-categories" class="btn-sm" style="flex: 1; padding: 8px; font-weight: bold; background: #666; color: white;" onclick="switchAdminTab('categories')">🏷 Керувати категоріями</button>
+                </div>
             </div>
             
-            <div id="admin-budget-list" style="max-height: 350px; overflow-y: auto; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
-                Оберіть користувача та місяць.
+            <!-- Розділ Бюджети -->
+            <div id="admin-tab-budgets" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <label for="admin-budget-month" style="font-size: 0.85em; font-weight: bold;">Місяць бюджету:</label>
+                    <input type="month" id="admin-budget-month" style="max-width: 160px; padding: 4px;" onchange="loadAdminBudgetsForUser()">
+                </div>
+                <div id="admin-budget-list" style="max-height: 320px; overflow-y: auto; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
+                    Оберіть користувача та місяць.
+                </div>
+            </div>
+
+            <!-- Розділ Категорії -->
+            <div id="admin-tab-categories" style="display: none;">
+                <div id="admin-categories-list-box" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 8px;">
+                    Завантаження категорій...
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                    <input type="text" id="admin-new-cat-input" placeholder="Нова категорія для користувача" style="flex: 1; margin: 0;" onkeydown="if(event.key==='Enter') addAdminUserCategory()">
+                    <button type="button" style="background: #4CAF50;" onclick="addAdminUserCategory()">➕ Додати</button>
+                </div>
             </div>
             
             <div id="admin-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
@@ -159,7 +171,7 @@
             
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('admin-debug-panel')">🐛 Діагностика</button>
-                <button class="btn-danger" onclick="document.getElementById('admin-budgets-modal').style.display='none'">Закрити</button>
+                <button class="btn-danger" onclick="closeAdminModal()">Закрити</button>
             </div>
         </div>
     </div>
