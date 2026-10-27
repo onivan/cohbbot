@@ -18,6 +18,9 @@ templates = Jinja2Templates(directory="templates")
 os.makedirs("receipts", exist_ok=True)
 app.mount("/receipts", StaticFiles(directory="receipts"), name="receipts")
 
+# Монтування статики (CSS, JS)
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Pydantic моделі валідації
 class ExpenseData(BaseModel):
