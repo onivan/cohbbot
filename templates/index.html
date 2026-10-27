@@ -412,7 +412,12 @@
                     }
                 })
                 .catch(err => {
-                    list.innerHTML = 'Помилка завантаження бюджетів.';
+                    list.innerHTML = 'Помилка завантаження бюджетів: ' + err.message;
+                    const debugPanel = document.getElementById('budget-debug-panel');
+                    if (debugPanel) {
+                        debugPanel.textContent = 'Error parsing data:\n' + err.stack;
+                        debugPanel.style.display = 'block';
+                    }
                     console.error(err);
                 });
         }
@@ -562,7 +567,12 @@
                 }
             })
             .catch(err => {
-                list.innerHTML = 'Помилка завантаження даних.';
+                list.innerHTML = 'Помилка завантаження даних: ' + err.message;
+                const debugPanel = document.getElementById('admin-debug-panel');
+                if (debugPanel) {
+                    debugPanel.textContent = 'Error parsing admin data:\n' + err.stack;
+                    debugPanel.style.display = 'block';
+                }
                 console.error(err);
             });
         }
