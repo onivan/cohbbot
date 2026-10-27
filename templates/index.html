@@ -314,24 +314,29 @@
                     allExpenses.forEach(exp => {
                         const expDate = parseDate(exp.Date);
                         if (expDate && `${expDate.year}-${expDate.month}` === month) {
-                            const catName = exp.Category || 'Інше';
+                            const catName = exp.Category_Name || exp.Category || 'Інше';
                             const amount = parseFloat(exp.Amount) || 0;
                             
-                            // Шукаємо ID категорії за назвою (спрощено)
-                            let catId = 'cat_other';
-                            const matchedCat = currentCategories.find(c => {
-                                const cName = typeof c === 'object' ? c.name : c;
-                                return cName === catName;
-                            });
-                            if (matchedCat) {
-                                catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                            // З новою структурою таблиці Expenses намагаємося взяти Category_ID
+                            let catId = String(exp.Category_ID || '').trim();
+                            
+                            // Fallback (для старих записів): шукаємо ID за іменем категорії
+                            if (!catId || !catId.startsWith('cat_')) {
+                                catId = 'cat_other';
+                                const matchedCat = currentCategories.find(c => {
+                                    const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
+                                    return cName === String(catName).trim();
+                                });
+                                if (matchedCat) {
+                                    catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                                }
                             }
                     
                             const cleanCatId = String(catId).trim();
                             if (!expensesByCat[cleanCatId]) expensesByCat[cleanCatId] = 0;
                             expensesByCat[cleanCatId] += amount;
-                }
-            });
+                        }
+                    });
             
             if (currentCategories.length === 0) {
                 list.innerHTML = 'Категорії не завантажено.';
@@ -457,20 +462,27 @@
                 targetExpenses.forEach(exp => {
                     const expDate = parseDate(exp.Date);
                     if (expDate && `${expDate.year}-${expDate.month}` === month) {
-                        const catName = exp.Category || 'Інше';
+                        const catName = exp.Category_Name || exp.Category || 'Інше';
                         const amount = parseFloat(exp.Amount) || 0;
                         
-                        let catId = 'cat_other';
-                        const matchedCat = userCats.find(c => {
-                            const cName = typeof c === 'object' ? c.name : c;
-                            return cName === catName;
-                        });
-                        if (matchedCat) {
-                            catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                        // Беремо Category_ID якщо воно є
+                        let catId = String(exp.Category_ID || '').trim();
+                        
+                        // Fallback для старих даних
+                        if (!catId || !catId.startsWith('cat_')) {
+                            catId = 'cat_other';
+                            const matchedCat = userCats.find(c => {
+                                const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
+                                return cName === String(catName).trim();
+                            });
+                            if (matchedCat) {
+                                catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                            }
                         }
                         
-                        if (!expensesByCat[catId]) expensesByCat[catId] = 0;
-                        expensesByCat[catId] += amount;
+                        const cleanCatId = String(catId).trim();
+                        if (!expensesByCat[cleanCatId]) expensesByCat[cleanCatId] = 0;
+                        expensesByCat[cleanCatId] += amount;
                     }
                 });
                 
