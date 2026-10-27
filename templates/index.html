@@ -306,7 +306,6 @@
                             "expensesCount": allExpenses.length,
                             "firstExpenseRaw": allExpenses[0] || null,
                             "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date) : null,
-                            "expensesByCatResult": expensesByCat,
                             "budgetsResult": budgets
                         }, null, 2);
                         debugPanel.style.display = 'block';
@@ -466,7 +465,6 @@
                         "targetExpensesCount": targetExpenses.length,
                         "firstTargetExpenseRaw": targetExpenses[0] || null,
                         "parsedFirstDate": targetExpenses[0] ? parseDate(targetExpenses[0].Date) : null,
-                        "expensesByCatResult": expensesByCat,
                         "budgetsResult": budgets
                     }, null, 2);
                     debugPanel.style.display = 'block';
