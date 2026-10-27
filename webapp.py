@@ -175,7 +175,16 @@ async def upload_receipt(user_id: int, file: UploadFile = File(...)):
 @app.get("/api/expenses/{user_id}")
 async def get_expenses(user_id: int):
     expenses = await database.get_user_expenses(user_id)
-    return {"status": "ok", "data": expenses}
+    first_exp = expenses[0] if expenses else {}
+    return {
+        "status": "ok", 
+        "data": expenses, 
+        "_debug_sample": {
+            "total_count": len(expenses),
+            "first_record": first_exp,
+            "keys": list(first_exp.keys()) if first_exp else []
+        }
+    }
 
 @app.post("/api/expenses/{user_id}")
 async def create_expense(user_id: int, data: ExpenseData):
