@@ -13,15 +13,14 @@
         <span>Оновлення...</span>
     </div>
 
-    <div class="header-bar">
-        <h2 id="total-header">Витрати: 0.00 грн</h2>
-        <div>
-            <button id="btn-admin-budgets" style="background: #9c27b0; display: none;" onclick="openAdminBudgetsModal()">🎯 Адмін</button>
-            <button id="btn-my-budget" style="background: #4CAF50;" onclick="openMyBudgetModal()">📊 Бюджет</button>
-            <button style="background: #666;" onclick="openSettings()">⚙️ Центр</button>
-            <button style="background: #666;" onclick="openCategoriesModal()">🏷 Категорії</button>
-            <button onclick="openForm()">➕ Додати</button>
-        </div>
+    <h2 id="total-header" style="text-align: center; margin-top: 10px; margin-bottom: 15px; display: none;">Витрати: 0.00 грн</h2>
+
+    <div class="header-bar" style="display: flex; justify-content: space-between; gap: 5px; flex-wrap: wrap; margin-bottom: 15px;">
+        <button id="btn-admin-budgets" style="flex: 1; min-width: 80px; background: #9c27b0; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openAdminBudgetsModal()">🎯 Адмін</button>
+        <button id="btn-my-budget" style="flex: 1; min-width: 80px; background: #4CAF50; padding: 8px 4px; font-size: 0.85em;" onclick="openMyBudgetModal()">📊 Бюджет</button>
+        <button style="flex: 1; min-width: 80px; background: #666; padding: 8px 4px; font-size: 0.85em;" onclick="openSettings()">⚙️ Центр</button>
+        <button style="flex: 1; min-width: 80px; background: #666; padding: 8px 4px; font-size: 0.85em;" onclick="openCategoriesModal()">🏷 Категорії</button>
+        <button style="flex: 1; min-width: 80px; padding: 8px 4px; font-size: 0.85em;" onclick="openForm()">➕ Додати</button>
     </div>
     
     <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
@@ -131,7 +130,8 @@
                 Debug panel (waiting for data...)
             </div>
             
-            <div style="display: flex; justify-content: flex-end;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('budget-debug-panel')">🐛 Діагностика</button>
                 <button onclick="document.getElementById('my-budget-modal').style.display='none'">Закрити</button>
             </div>
         </div>
@@ -157,7 +157,8 @@
                 Admin debug panel (waiting for data...)
             </div>
             
-            <div style="display: flex; justify-content: flex-end;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('admin-debug-panel')">🐛 Діагностика</button>
                 <button class="btn-danger" onclick="document.getElementById('admin-budgets-modal').style.display='none'">Закрити</button>
             </div>
         </div>

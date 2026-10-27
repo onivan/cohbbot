@@ -45,10 +45,26 @@ function parseDate(rawDate) {
         document.getElementById('my-budget-month').value = currentMonth;
         document.getElementById('admin-budget-month').value = currentMonth;
         
-        // Встановлюємо поточний місяць і для головного фільтра
+                // Встановлюємо поточний місяць і для головного фільтра
         const mainMonthFilter = document.getElementById('main-month-filter');
         if (mainMonthFilter) {
             mainMonthFilter.value = currentMonth;
+        }
+        
+        function resetMonthFilter() {
+            const currentMonth = new Date().toISOString().slice(0, 7);
+            const mainMonthFilter = document.getElementById('main-month-filter');
+            if (mainMonthFilter) {
+                mainMonthFilter.value = currentMonth;
+            }
+            loadExpenses();
+        }
+        
+        function toggleDebug(panelId) {
+            const panel = document.getElementById(panelId);
+            if (panel) {
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            }
         }
         
         let currentUserRole = 'user';
@@ -121,7 +137,7 @@ function parseDate(rawDate) {
                     
                     // Виводимо дебаг в панель (можна розкоментувати за потреби)
                     
-                    const debugPanel = document.getElementById('budget-debug-panel');
+                                        const debugPanel = document.getElementById('budget-debug-panel');
                     if (debugPanel) {
                         debugPanel.textContent = JSON.stringify({
                             "currentMonthSelected": month,
@@ -130,7 +146,6 @@ function parseDate(rawDate) {
                             "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date) : null,
                             "budgetsResult": budgets
                         }, null, 2);
-                        debugPanel.style.display = 'block';
                     }
                     
                     
@@ -280,7 +295,7 @@ function parseDate(rawDate) {
                 
                 // Виводимо дебаг в панель адміна (можна розкоментувати за потреби)
                 
-                const debugPanel = document.getElementById('admin-debug-panel');
+                                const debugPanel = document.getElementById('admin-debug-panel');
                 if (debugPanel) {
                     debugPanel.textContent = JSON.stringify({
                         "monthSelected": month,
@@ -289,7 +304,6 @@ function parseDate(rawDate) {
                         "parsedFirstDate": targetExpenses[0] ? parseDate(targetExpenses[0].Date) : null,
                         "budgetsResult": budgets
                     }, null, 2);
-                    debugPanel.style.display = 'block';
                 }
                 
             
@@ -484,6 +498,59 @@ function parseDate(rawDate) {
             });
         }
 
+        function updateMainBudgetSummary(month, totalSpent) {
+            const summaryBox = document.getElementById('main-budget-summary');
+            if (!summaryBox) return;
+            
+            if (!month) {
+                summaryBox.style.display = 'none';
+                return;
+            }
+            
+            fetch(`/api/budgets/${userId}?month=${month}`)
+                .then(r => r.json())
+                .then(res => {
+                    const budgets = res.data || {};
+                    let totalPlanned = 0;
+                    for (const catId in budgets) {
+                        totalPlanned += parseFloat(budgets[catId]) || 0;
+                    }
+                    
+                    if (totalPlanned > 0) {
+                        summaryBox.style.display = 'block';
+                        
+                        let percent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                        let remaining = totalPlanned - totalSpent;
+                        
+                        const textEl = document.getElementById('main-budget-text');
+                        if (textEl) textEl.textContent = `${totalSpent.toFixed(0)} / ${totalPlanned.toFixed(0)} грн`;
+                        
+                        const bar = document.getElementById('main-budget-bar');
+                        if (bar) {
+                            bar.style.width = percent + '%';
+                            bar.style.backgroundColor = getProgressBarColor(percent);
+                        }
+                        
+                        const remainingEl = document.getElementById('main-budget-remaining');
+                        if (remainingEl) {
+                            if (remaining < 0) {
+                                remainingEl.textContent = 'Перевитрата: ' + Math.abs(remaining).toFixed(0) + ' грн';
+                                remainingEl.style.color = '#F44336';
+                            } else {
+                                remainingEl.textContent = 'Залишок: ' + remaining.toFixed(0) + ' грн';
+                                remainingEl.style.color = 'var(--tg-theme-hint-color, #888)';
+                            }
+                        }
+                    } else {
+                        summaryBox.style.display = 'none';
+                    }
+                })
+                .catch(err => {
+                    console.error("Error loading budget summary:", err);
+                    summaryBox.style.display = 'none';
+                });
+        }
+
         function loadExpenses(targetExpenseId = null) {
             if (!userId) {
                 const debugData = JSON.stringify(tg.initDataUnsafe, null, 2);
@@ -572,7 +639,7 @@ function parseDate(rawDate) {
                                 <span>${displayDate} | ${item.category_name || item.Category || 'Інше'}</span>
                                 ${receiptIconHtml}
                             </div>
-                            ${debugInfo}
+                            <!-- ${debugInfo} -->
                             <div class="card-actions">
                                 <button class="btn-sm" onclick="openForm('${expId}', '${item.Date}', ${amountNum}, '${safeName}', '${safeCat}', '${item.Receipt_Path || ''}')">✏️ Редагувати</button>
                                 <button class="btn-sm btn-danger" onclick="deleteExpense('${expId}')">🗑 Видалити</button>
@@ -585,7 +652,7 @@ function parseDate(rawDate) {
                     list.innerHTML = '';
                     list.appendChild(fragment);
 
-                    document.getElementById('total-header').innerText = `Витрати: ${totalSum.toFixed(2)} грн`;
+                    document.getElementById('total-header').innerText = `Витрати`;
                     updateMainBudgetSummary(monthVal, totalSum);
 
                     if (targetExpenseId) {
@@ -593,9 +660,9 @@ function parseDate(rawDate) {
                         if (targetCard) targetCard.style.animation = 'highlight 1.2s ease';
                     }
                 })
-                .catch(err => {
+                                .catch(err => {
                     if (loadingIndicator) loadingIndicator.style.display = 'none';
-                    document.getElementById('expenses-list').innerHTML = '<div style="color:red; text-align:center; padding:20px;">Помилка завантаження даних.</div>';
+                    document.getElementById('expenses-list').innerHTML = `<div style="color:red; text-align:center; padding:20px;">Помилка завантаження даних.<br><br><span style="font-size:0.8em; color:gray;">Деталі: ${err.message}<br>${err.stack}</span></div>`;
                 });
         }
 
