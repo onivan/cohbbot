@@ -1,0 +1,932 @@
+function parseDate(rawDate) {
+            if (!rawDate) return null;
+            if (!isNaN(rawDate) && !String(rawDate).includes('-') && !String(rawDate).includes('.')) {
+                const serial = Number(rawDate);
+                const utcDays = serial - 25569;
+                const dateObj = new Date(utcDays * 86400 * 1000);
+                return {
+                    year: dateObj.getUTCFullYear(),
+                    month: String(dateObj.getUTCMonth() + 1).padStart(2, '0'),
+                    day: String(dateObj.getUTCDate()).padStart(2, '0')
+                };
+            }
+            const dateStr = String(rawDate).trim().split(' ')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return { year: parts[0], month: parts[1].padStart(2, '0'), day: parts[2].padStart(2, '0') };
+            }
+            return null;
+        }
+
+        function formatDateForDisplay(rawDate) {
+            const parsed = parseDate(rawDate);
+            if (!parsed) return rawDate || '';
+            return `${parsed.day}.${parsed.month}.${parsed.year}`;
+        }
+
+        function formatDateForInput(rawDate) {
+            const parsed = parseDate(rawDate);
+            if (!parsed) return new Date().toISOString().split('T')[0];
+            return `${parsed.year}-${parsed.month}-${parsed.day}`;
+        }
+
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        if (tg.colorScheme === 'dark') {
+            document.body.classList.add('dark');
+        }
+
+        // БЕЗПЕЧНА АВТОРИЗАЦІЯ ВІД TELEGRAM (без хардкоду)
+        const user = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+        const userId = user ? user.id : null;
+                const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+        document.getElementById('my-budget-month').value = currentMonth;
+        document.getElementById('admin-budget-month').value = currentMonth;
+        
+        // Встановлюємо поточний місяць і для головного фільтра
+        const mainMonthFilter = document.getElementById('main-month-filter');
+        if (mainMonthFilter) {
+            mainMonthFilter.value = currentMonth;
+        }
+        
+        let currentUserRole = 'user';
+
+        function checkUserRole() {
+            if (!userId) return;
+            fetch(`/api/user/${userId}/role`)
+                .then(r => r.json())
+                .then(res => {
+                    currentUserRole = res.role;
+                    if (currentUserRole === 'admin') {
+                        document.getElementById('btn-admin-budgets').style.display = 'inline-block';
+                        loadUsersForAdmin();
+                    }
+                })
+                .catch(err => console.error("Error fetching user role:", err));
+        }
+        
+        
+
+        let allExpenses = [];      
+        let currentEditIndex = -1; 
+        
+        function loadUsersForAdmin() {
+            fetch(`/api/admin/users?admin_id=${userId}`)
+                .then(r => r.json())
+                .then(res => {
+                    const select = document.getElementById('admin-user-select');
+                    select.innerHTML = '<option value="">-- Оберіть користувача --</option>';
+                    if (res.data) {
+                        res.data.forEach(u => {
+                            const opt = document.createElement('option');
+                            opt.value = u.user_id;
+                            opt.textContent = `${u.name} (${u.center})`;
+                            select.appendChild(opt);
+                        });
+                    }
+                });
+        }
+
+        // ==========================================
+        // БЮДЖЕТИ (КОРИСТУВАЧ)
+        // ==========================================
+        
+        function openMyBudgetModal() {
+            document.getElementById('my-budget-modal').style.display = 'block';
+            loadMyBudget();
+        }
+        
+        function getProgressBarColor(percent) {
+            if (percent <= 25) return '#4CAF50'; // Зелений (до 25%)
+            if (percent <= 50) return '#8BC34A'; // Світло-зелений (26-50%)
+            if (percent <= 75) return '#FFC107'; // Бурштиновий (51-75%)
+            if (percent <= 99) return '#FF9800'; // Помаравневий (76-99%)
+            return '#F44336'; // Червоний (100% і більше)
+        }
+        
+        function loadMyBudget() {
+            const month = document.getElementById('my-budget-month').value;
+            if (!month || !userId) return;
+            
+            const list = document.getElementById('my-budget-list');
+            list.innerHTML = 'Завантаження...';
+            
+            // Отримуємо бюджети
+            fetch(`/api/budgets/${userId}?month=${month}`)
+                .then(r => r.json())
+                .then(budgetRes => {
+                    const budgets = budgetRes.data || {};
+                    
+                    // Виводимо дебаг в панель (можна розкоментувати за потреби)
+                    
+                    const debugPanel = document.getElementById('budget-debug-panel');
+                    if (debugPanel) {
+                        debugPanel.textContent = JSON.stringify({
+                            "currentMonthSelected": month,
+                            "expensesCount": allExpenses.length,
+                            "firstExpenseRaw": allExpenses[0] || null,
+                            "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date) : null,
+                            "budgetsResult": budgets
+                        }, null, 2);
+                        debugPanel.style.display = 'block';
+                    }
+                    
+                    
+                    // Обчислюємо фактичні витрати за обраний місяць
+                    const expensesByCat = {};
+                    let totalSpent = 0;
+                    let totalPlanned = 0;
+                    
+                    allExpenses.forEach(exp => {
+                        const expDate = parseDate(exp.Date);
+                        if (expDate && `${expDate.year}-${expDate.month}` === month) {
+                            const catName = exp.Category_Name || exp.Category || 'Інше';
+                            const amount = parseFloat(exp.Amount) || 0;
+                            
+                            // З новою структурою таблиці Expenses намагаємося взяти Category_ID
+                            let catId = String(exp.Category_ID || '').trim();
+                            
+                            // Fallback (для старих записів): шукаємо ID за іменем категорії
+                            if (!catId || !catId.startsWith('cat_')) {
+                                catId = 'cat_other';
+                                const matchedCat = currentCategories.find(c => {
+                                    const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
+                                    return cName === String(catName).trim();
+                                });
+                                if (matchedCat) {
+                                    catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                                }
+                            }
+                    
+                            const cleanCatId = String(catId).trim();
+                            if (!expensesByCat[cleanCatId]) expensesByCat[cleanCatId] = 0;
+                            expensesByCat[cleanCatId] += amount;
+                        }
+                    });
+            
+            if (currentCategories.length === 0) {
+                list.innerHTML = 'Категорії не завантажено.';
+                return;
+            }
+            
+            let html = '';
+            currentCategories.forEach(cat => {
+                const catId = typeof cat === 'object' ? cat.id : cat;
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                
+                const cleanCatId = String(catId).trim();
+                const planned = budgets[cleanCatId] || 0;
+                const spent = expensesByCat[cleanCatId] || 0;
+                const remaining = planned - spent;
+                        
+                        totalPlanned += planned;
+                        totalSpent += spent;
+                        
+                        let percent = 0;
+                        if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
+                        else if (spent > 0) percent = 100; // Витрати без бюджету
+                        
+                        let barColor = getProgressBarColor(percent);
+                        
+                        // Не показуємо категорію, якщо немає ні плану, ні витрат
+                        if (planned === 0 && spent === 0) return;
+                        
+                        html += `
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
+                                    <strong>${catName}</strong>
+                                    <span>${spent.toFixed(0)} / ${planned > 0 ? planned.toFixed(0) : '—'} грн</span>
+                                </div>
+                                <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
+                                    <div style="width: ${percent}%; background: ${barColor}; height: 100%;"></div>
+                                </div>
+                                <div style="font-size: 0.8em; color: ${remaining < 0 ? '#F44336' : 'var(--tg-theme-hint-color, #888)'}; margin-top: 2px; text-align: right;">
+                                    ${remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) : 'Залишок: ' + remaining.toFixed(0)} грн
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    if (html === '') {
+                        list.innerHTML = '<div style="text-align:center; color: #888;">Немає запланованих бюджетів та витрат у цьому місяці.</div>';
+                    } else {
+                        // Додаємо підсумок
+                        let totalPercent = 0;
+                        if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                        let totalBarColor = getProgressBarColor(totalPercent);
+                        
+                        html += `
+                            <hr style="border-top: 1px solid #ccc; margin: 15px 0;">
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 1em; margin-bottom: 4px;">
+                                    <strong>ВСЬОГО</strong>
+                                    <strong>${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
+                                </div>
+                                <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 10px; overflow: hidden;">
+                                    <div style="width: ${totalPercent}%; background: ${totalBarColor}; height: 100%;"></div>
+                                </div>
+                            </div>
+                        `;
+                        list.innerHTML = html;
+                    }
+                })
+                .catch(err => {
+                    list.innerHTML = 'Помилка завантаження бюджетів: ' + err.message;
+                    const debugPanel = document.getElementById('budget-debug-panel');
+                    if (debugPanel) {
+                        debugPanel.textContent = 'Error parsing data:\n' + err.stack;
+                        debugPanel.style.display = 'block';
+                    }
+                    console.error(err);
+                });
+        }
+
+        // ==========================================
+        // БЮДЖЕТИ (АДМІНІСТРАТОР)
+        // ==========================================
+
+        function openAdminBudgetsModal() {
+            document.getElementById('admin-budgets-modal').style.display = 'block';
+        }
+        
+        function loadAdminBudgetsForUser() {
+            const targetUserId = document.getElementById('admin-user-select').value;
+            const month = document.getElementById('admin-budget-month').value;
+            const list = document.getElementById('admin-budget-list');
+            
+            if (!targetUserId) {
+                list.innerHTML = 'Оберіть користувача.';
+                return;
+            }
+            if (!month) {
+                list.innerHTML = 'Оберіть місяць.';
+                return;
+            }
+            
+            list.innerHTML = 'Завантаження категорій, бюджетів та витрат...';
+            
+            // Отримуємо категорії, бюджети та фактичні витрати паралельно
+            Promise.all([
+                fetch(`/api/categories/${targetUserId}`).then(r => r.json()),
+                fetch(`/api/budgets/${targetUserId}?month=${month}`).then(r => r.json()),
+                fetch(`/api/expenses/${targetUserId}`).then(r => r.json())
+        ])
+        .then(([catRes, budgetRes, expRes]) => {
+                const userCats = sortCategories(catRes.data || []);
+                const budgets = budgetRes.data || {};
+                const targetExpenses = expRes.data || [];
+                
+                // Виводимо дебаг в панель адміна (можна розкоментувати за потреби)
+                
+                const debugPanel = document.getElementById('admin-debug-panel');
+                if (debugPanel) {
+                    debugPanel.textContent = JSON.stringify({
+                        "monthSelected": month,
+                        "targetExpensesCount": targetExpenses.length,
+                        "firstTargetExpenseRaw": targetExpenses[0] || null,
+                        "parsedFirstDate": targetExpenses[0] ? parseDate(targetExpenses[0].Date) : null,
+                        "budgetsResult": budgets
+                    }, null, 2);
+                    debugPanel.style.display = 'block';
+                }
+                
+            
+                // Обчислюємо фактичні витрати обраного користувача
+                const expensesByCat = {};
+                let totalSpent = 0;
+                let totalPlanned = 0;
+                
+                targetExpenses.forEach(exp => {
+                    const expDate = parseDate(exp.Date);
+                    if (expDate && `${expDate.year}-${expDate.month}` === month) {
+                        const catName = exp.Category_Name || exp.Category || 'Інше';
+                        const amount = parseFloat(exp.Amount) || 0;
+                        
+                        // Беремо Category_ID якщо воно є
+                        let catId = String(exp.Category_ID || '').trim();
+                        
+                        // Fallback для старих даних
+                        if (!catId || !catId.startsWith('cat_')) {
+                            catId = 'cat_other';
+                            const matchedCat = userCats.find(c => {
+                                const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
+                                return cName === String(catName).trim();
+                            });
+                            if (matchedCat) {
+                                catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
+                            }
+                        }
+                        
+                        const cleanCatId = String(catId).trim();
+                        if (!expensesByCat[cleanCatId]) expensesByCat[cleanCatId] = 0;
+                        expensesByCat[cleanCatId] += amount;
+                    }
+                });
+                
+                let html = '';
+                userCats.forEach(cat => {
+                    const catId = typeof cat === 'object' ? cat.id : cat;
+                    const catName = typeof cat === 'object' ? cat.name : cat;
+                
+                    // Нормалізуємо catId для надійного пошуку в budgets
+                    const cleanCatId = String(catId).trim();
+                    const planned = budgets[cleanCatId] || 0;
+                    const spent = expensesByCat[cleanCatId] || 0;
+                    const remaining = planned - spent;
+                    
+                    totalPlanned += planned;
+                    totalSpent += spent;
+                    
+                    let percent = 0;
+                    if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
+                    else if (spent > 0) percent = 100;
+                    
+                    let barColor = getProgressBarColor(percent);
+                    
+                    html += `
+                        <div style="margin-bottom: 15px; border-bottom: 1px solid var(--tg-theme-hint-color, #eee); padding-bottom: 10px;">
+                            <div style="display: flex; align-items: center; margin-bottom: 5px; gap: 10px;">
+                                <div style="flex: 2; font-weight: bold; font-size: 0.9em;">${catName}</div>
+                                <div style="flex: 1; display: flex; align-items: center; justify-content: flex-end;">
+                                    <input type="number" id="budget-input-${catId}" value="${planned || ''}" placeholder="0" style="width: 70px; text-align: right; margin: 0; padding: 4px;" oninput="updateAdminBudgetPreview('${catId}', ${spent})">
+                                </div>
+                                <button class="btn-sm" style="background-color: #4CAF50; padding: 4px 8px;" onclick="saveAdminBudget('${targetUserId}', '${catId}', '${month}')">💾</button>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8em; margin-bottom: 4px; color: var(--tg-theme-hint-color, #888);">
+                                <span>Витрачено: ${spent.toFixed(0)} грн</span>
+                                <span id="budget-remaining-${catId}" style="color: ${remaining < 0 ? '#F44336' : ''};">${remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) : 'Залишок: ' + remaining.toFixed(0)} грн</span>
+                            </div>
+                            <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 6px; overflow: hidden;">
+                                <div id="budget-bar-${catId}" style="width: ${percent}%; background: ${barColor}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                if (html === '') {
+                    list.innerHTML = 'У користувача немає категорій.';
+                } else {
+                    let totalPercent = 0;
+                    if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                    let totalBarColor = getProgressBarColor(totalPercent);
+                    
+                    html += `
+                        <div style="margin-top: 15px; padding-top: 10px;" id="admin-total-block" data-total-spent="${totalSpent}">
+                            <div style="display: flex; justify-content: space-between; font-size: 1em; margin-bottom: 4px;">
+                                <strong>ВСЬОГО</strong>
+                                <strong id="admin-total-text">${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн</strong>
+                            </div>
+                            <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
+                                <div id="admin-total-bar" style="width: ${totalPercent}%; background: ${totalBarColor}; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
+                            </div>
+                        </div>
+                    `;
+                    list.innerHTML = html;
+                }
+            })
+            .catch(err => {
+                list.innerHTML = 'Помилка завантаження даних: ' + err.message;
+                const debugPanel = document.getElementById('admin-debug-panel');
+                if (debugPanel) {
+                    debugPanel.textContent = 'Error parsing admin data:\n' + err.stack;
+                    debugPanel.style.display = 'block';
+                }
+                console.error(err);
+            });
+        }
+        
+        function updateAdminBudgetPreview(catId, spent) {
+            const input = document.getElementById(`budget-input-${catId}`);
+            if (!input) return;
+            
+            let planned = parseFloat(input.value);
+            if (isNaN(planned) || planned < 0) planned = 0;
+            
+            const remaining = planned - spent;
+            const remainingSpan = document.getElementById(`budget-remaining-${catId}`);
+            if (remainingSpan) {
+                if (remaining < 0) {
+                    remainingSpan.textContent = 'Перевитрата: ' + Math.abs(remaining).toFixed(0) + ' грн';
+                    remainingSpan.style.color = '#F44336';
+                } else {
+                    remainingSpan.textContent = 'Залишок: ' + remaining.toFixed(0) + ' грн';
+                    remainingSpan.style.color = '';
+                }
+            }
+            
+            const bar = document.getElementById(`budget-bar-${catId}`);
+            if (bar) {
+                let percent = 0;
+                if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
+                else if (spent > 0) percent = 100;
+                
+                bar.style.width = percent + '%';
+                bar.style.backgroundColor = getProgressBarColor(percent);
+            }
+            
+            recalculateAdminTotals();
+        }
+        
+        function recalculateAdminTotals() {
+            const totalBlock = document.getElementById('admin-total-block');
+            if (!totalBlock) return;
+            
+            const totalSpent = parseFloat(totalBlock.getAttribute('data-total-spent')) || 0;
+            let totalPlanned = 0;
+            
+            // Збираємо суми з усіх інпутів бюджету
+            const inputs = document.querySelectorAll('[id^="budget-input-"]');
+            inputs.forEach(input => {
+                let val = parseFloat(input.value);
+                if (!isNaN(val) && val > 0) {
+                    totalPlanned += val;
+                }
+            });
+            
+            const totalText = document.getElementById('admin-total-text');
+            if (totalText) {
+                totalText.textContent = `${totalSpent.toFixed(0)} / ${totalPlanned > 0 ? totalPlanned.toFixed(0) : '—'} грн`;
+            }
+            
+            const totalBar = document.getElementById('admin-total-bar');
+            if (totalBar) {
+                let totalPercent = 0;
+                if (totalPlanned > 0) totalPercent = Math.min(100, Math.round((totalSpent / totalPlanned) * 100));
+                
+                totalBar.style.width = totalPercent + '%';
+                totalBar.style.backgroundColor = getProgressBarColor(totalPercent);
+            }
+        }
+        
+        function saveAdminBudget(targetUserId, categoryId, month) {
+            const input = document.getElementById(`budget-input-${categoryId}`);
+            let amount = parseFloat(input.value);
+            if (isNaN(amount) || amount < 0) amount = 0;
+            
+            fetch(`/api/admin/budgets?admin_id=${userId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    target_user_id: parseInt(targetUserId),
+                    month: month,
+                    category_id: categoryId,
+                    amount: amount
+                })
+            }).then(r => {
+                if (r.ok) {
+                    input.style.backgroundColor = '#d4edda'; // green highlight
+                    setTimeout(() => input.style.backgroundColor = '', 1000);
+                } else {
+                    alert("Помилка збереження бюджету!");
+                }
+            });
+        }
+
+        function loadExpenses(targetExpenseId = null) {
+            if (!userId) {
+                const debugData = JSON.stringify(tg.initDataUnsafe, null, 2);
+                const currentUrl = window.location.href;
+                debugDataFull = "Full URL:" + window.location.href + "<br>Hash:" + window.location.hash + "<br>Raw initData:" + tg.initData + "<br>initDataUnsafe:" + tg.initDataUnsafe;
+                
+                document.getElementById('expenses-list').innerHTML = 
+                    '<div style="color: red; text-align: center; padding: 20px;">' +
+                    '⚠️ Авторизація недійсна.<br><br>' +
+                    '<div style="color: black; text-align: left; font-size: 12px; background: #eee; padding: 10px; border-radius: 5px; overflow-x: auto;">' +
+                    '<b>URL:</b><br>' + currentUrl + '<br><br>' +
+                    '<b>Full Debug Data:</b><br><pre>' + debugDataFull + '</pre>' +
+                    '</div></div>';
+                document.getElementById('total-header').innerText = 'Помилка доступу';
+                return;
+            }
+
+            const list = document.getElementById('expenses-list');
+            const loadingIndicator = document.getElementById('loading-indicator');
+
+            if (list.children.length === 0) {
+                list.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--tg-theme-hint-color, #888);">Завантаження...</div>';
+            } else if (loadingIndicator) {
+                loadingIndicator.style.display = 'flex';
+            }
+
+            fetch(`/api/expenses/${userId}`)
+                .then(response => {
+                    if (!response.ok) throw new Error("Помилка доступу");
+                    return response.json();
+                })
+                .then(result => {
+                    if (loadingIndicator) loadingIndicator.style.display = 'none';
+                    allExpenses = result.data || [];
+
+                    let totalSum = 0;
+                    
+                    const filterMonth = document.getElementById('main-month-filter');
+                    const monthVal = filterMonth ? filterMonth.value : '';
+                    
+                    let filteredExpenses = allExpenses;
+                    if (monthVal) {
+                        filteredExpenses = allExpenses.filter(item => {
+                            const d = parseDate(item.Date);
+                            return d && d.year + '-' + d.month === monthVal;
+                        });
+                    }
+
+                    if (filteredExpenses.length === 0) {
+                        list.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--tg-theme-hint-color, #888);">Витрат за цей період немає.</div>';
+                        document.getElementById('total-header').innerText = 'Витрати: 0.00 грн';
+                        updateMainBudgetSummary(monthVal, 0);
+                        return;
+                    }
+
+                    const fragment = document.createDocumentFragment();
+
+                    filteredExpenses.forEach(item => {
+                        const amountNum = parseFloat(item.Amount) || 0;
+                        totalSum += amountNum;
+                        
+                        let receiptIconHtml = '';
+                        if (item.Receipt_Path && item.Receipt_Path.trim() !== '') {
+                            receiptIconHtml = `<button class="receipt-btn" onclick="openReceipt('${item.Receipt_Path}')" title="Переглянути чек">📄 Чек</button>`;
+                        }
+                        
+                        const displayDate = formatDateForDisplay(item.Date);
+                        const expId = item.Expense_ID;
+                        
+                        const card = document.createElement('div');
+                        card.className = 'expense-card';
+                        card.id = `expense-card-${expId}`;
+
+                        const safeName = (item.Expense_Name || '').replace(/'/g, "\\'");
+                        const safeCat = (item.Category || '').replace(/'/g, "\\'");
+                        
+                        // ДІАГНОСТИЧНИЙ ВИВІД (можна видалити після виправлення)
+                        const debugInfo = `<div style="font-size: 0.6em; color: #aaa; margin-top: 5px; border-top: 1px dashed #eee; padding-top: 3px;">ID: ${item.Category_ID || 'null'} | Name_in_Sheet: ${item.Category_Name || 'null'} | Final: ${item.category_name || 'null'}</div>`;
+
+                        card.innerHTML = `
+                            <div class="header">
+                                <span>${item.Expense_Name}</span>
+                                <span>${amountNum.toFixed(2)} грн</span>
+                            </div>
+                            <div class="details">
+                                <span>${displayDate} | ${item.category_name || item.Category || 'Інше'}</span>
+                                ${receiptIconHtml}
+                            </div>
+                            ${debugInfo}
+                            <div class="card-actions">
+                                <button class="btn-sm" onclick="openForm('${expId}', '${item.Date}', ${amountNum}, '${safeName}', '${safeCat}', '${item.Receipt_Path || ''}')">✏️ Редагувати</button>
+                                <button class="btn-sm btn-danger" onclick="deleteExpense('${expId}')">🗑 Видалити</button>
+                            </div>
+                        `;
+
+                        fragment.appendChild(card);
+                    });
+
+                    list.innerHTML = '';
+                    list.appendChild(fragment);
+
+                    document.getElementById('total-header').innerText = `Витрати: ${totalSum.toFixed(2)} грн`;
+                    updateMainBudgetSummary(monthVal, totalSum);
+
+                    if (targetExpenseId) {
+                        const targetCard = document.getElementById(`expense-card-${targetExpenseId}`);
+                        if (targetCard) targetCard.style.animation = 'highlight 1.2s ease';
+                    }
+                })
+                .catch(err => {
+                    if (loadingIndicator) loadingIndicator.style.display = 'none';
+                    document.getElementById('expenses-list').innerHTML = '<div style="color:red; text-align:center; padding:20px;">Помилка завантаження даних.</div>';
+                });
+        }
+
+        function openReceipt(url) {
+            document.getElementById('receipt-image').src = url;
+            document.getElementById('receipt-external-link').href = url;
+            document.getElementById('receipt-modal').style.display = 'flex';
+        }
+
+        function closeReceipt() {
+            document.getElementById('receipt-modal').style.display = 'none';
+            document.getElementById('receipt-image').src = '';
+        }
+
+        function openForm(expenseId = '', date = '', amount = '', name = '', category = '', path = '') {
+            document.getElementById('f-expense-id').value = expenseId;
+            document.getElementById('f-date').value = formatDateForInput(date);
+            
+            if (amount !== '') {
+                const amountNum = parseFloat(amount) || 0;
+                const hryvnia = Math.floor(amountNum);
+                const kopeck = Math.round((amountNum - hryvnia) * 100);
+                document.getElementById('f-hryvnia').value = hryvnia;
+                document.getElementById('f-kopeck').value = kopeck.toString().padStart(2, '0');
+            } else {
+                document.getElementById('f-hryvnia').value = '';
+                document.getElementById('f-kopeck').value = '';
+            }
+
+            document.getElementById('f-name').value = name;
+            
+            const catSelect = document.getElementById('f-category');
+            let matchedOption = Array.from(catSelect.options).find(
+                opt => opt.value === category || opt.textContent.trim() === String(category).trim()
+            );
+            
+            if (matchedOption) {
+                catSelect.value = matchedOption.value;
+            } else if (category) {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                catSelect.appendChild(option);
+                catSelect.value = category;
+            } else {
+                catSelect.value = catSelect.options[0] ? catSelect.options[0].value : "";
+            }
+            
+            document.getElementById('f-path').value = path;
+            const fileInput = document.getElementById('f-file');
+            fileInput.value = '';
+            
+            if (path && path.trim() !== '') {
+                document.getElementById('receipt-preview-box').style.display = 'flex';
+                fileInput.style.display = 'none';
+            } else {
+                document.getElementById('receipt-preview-box').style.display = 'none';
+                fileInput.style.display = 'block';
+            }
+            
+            updateNavButtons(expenseId);
+            document.getElementById('form-title').innerText = expenseId ? 'Редагувати витрату' : 'Нова витрата';
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function removeAttachedReceipt() {
+            document.getElementById('f-path').value = '';
+            document.getElementById('receipt-preview-box').style.display = 'none';
+            document.getElementById('f-file').style.display = 'block';
+            document.getElementById('f-file').value = ''; 
+        }
+
+        function viewAttachedReceipt() {
+            const currentPath = document.getElementById('f-path').value;
+            if (currentPath) openReceipt(currentPath);
+        }
+
+        function closeForm() { document.getElementById('modal').style.display = 'none'; }
+
+        async function saveExpense() {
+            const fileInput = document.getElementById('f-file');
+            let currentPath = document.getElementById('f-path').value;
+            
+            if (fileInput.files.length > 0) {
+                const formData = new FormData();
+                formData.append("file", fileInput.files[0]);
+                try {
+                    const uploadRes = await fetch(`/api/upload/${userId}`, { method: "POST", body: formData });
+                    const uploadData = await uploadRes.json();
+                    if (uploadData.status === "ok") currentPath = uploadData.file_path;
+                } catch (err) {
+                    alert("Помилка під час завантаження чека.");
+                    return;
+                }
+            }
+
+            const expenseId = document.getElementById('f-expense-id').value;
+            const hryvnia = parseInt(document.getElementById('f-hryvnia').value) || 0;
+            const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
+            const totalAmount = hryvnia + (kopeck / 100);
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const msgId = urlParams.get('msg_id');
+            const selectedCategoryId = document.getElementById('f-category').value;
+
+            const payload = {
+                date: document.getElementById('f-date').value,
+                amount: totalAmount,
+                expense_name: document.getElementById('f-name').value,
+                category: selectedCategoryId,
+                file_path: currentPath,
+                msg_id: msgId ? parseInt(msgId) : null
+            };
+            
+            const method = expenseId ? 'PUT' : 'POST';
+            const url = expenseId ? `/api/expenses/${userId}/${expenseId}` : `/api/expenses/${userId}`;
+            
+            fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => {
+                if (!r.ok) { alert("Помилка збереження! Можливо, ви намагаєтеся відредагувати чужий запис."); return; }
+                closeForm(); 
+                loadExpenses(expenseId);
+                if (urlParams.get('draft') === '1') tg.close();
+            });
+        }
+
+        function deleteExpense(expenseId) {
+            if(confirm("Ви дійсно хочете видалити цей запис?")) {
+                fetch(`/api/expenses/${userId}/${expenseId}`, { method: 'DELETE' })
+                    .then(r => {
+                        if(!r.ok) alert("Помилка видалення!");
+                        loadExpenses();
+                    });
+            }
+        }
+
+        function openSettings() {
+            fetch(`/api/user/${userId}/center`)
+                .then(r => r.json())
+                .then(res => {
+                    document.getElementById('s-center').value = res.center || '';
+                    document.getElementById('settings-modal').style.display = 'block';
+                });
+        }
+
+        function saveSettings() {
+            const center = document.getElementById('s-center').value;
+            fetch(`/api/user/${userId}/center`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ center: center })
+            }).then(() => {
+                document.getElementById('settings-modal').style.display = 'none';
+                tg.showAlert("Назву центру оновлено!");
+            });
+        }
+
+        function updateNavButtons(expenseId) {
+            const navBox = document.getElementById('modal-nav-box');
+            const btnPrev = document.getElementById('btn-prev');
+            const btnNext = document.getElementById('btn-next');
+
+            if (!expenseId || allExpenses.length === 0) {
+                if (navBox) navBox.style.display = 'none';
+                currentEditIndex = -1;
+                return;
+            }
+
+            currentEditIndex = allExpenses.findIndex(item => String(item.Expense_ID) === String(expenseId));
+
+            if (currentEditIndex !== -1) {
+                if (navBox) navBox.style.display = 'flex';
+                btnPrev.disabled = (currentEditIndex <= 0);
+                btnNext.disabled = (currentEditIndex >= allExpenses.length - 1);
+            } else {
+                if (navBox) navBox.style.display = 'none';
+            }
+        }
+
+        function navExpense(direction) {
+            const newIdx = currentEditIndex + direction;
+            if (newIdx >= 0 && newIdx < allExpenses.length) {
+                const item = allExpenses[newIdx];
+                const amountNum = parseFloat(item.Amount) || 0;
+                openForm(item.Expense_ID, item.Date, amountNum, item.Expense_Name, item.Category, item.Receipt_Path || '');
+            }
+        }
+
+        // Керування персональними категоріями
+        let currentCategories = [];
+
+        function sortCategories(cats) {
+            return cats.sort((a, b) => {
+                const nameA = typeof a === 'object' ? (a.name || '') : String(a);
+                const nameB = typeof b === 'object' ? (b.name || '') : String(b);
+                if (nameA === 'Інше') return 1;
+                if (nameB === 'Інше') return -1;
+                return nameA.localeCompare(nameB, 'uk');
+            });
+        }
+
+        function loadCategories() {
+            if (!userId) return;
+            fetch(`/api/categories/${userId}`)
+                .then(response => response.json())
+                .then(result => {
+                    currentCategories = sortCategories(result.data || []);
+                    renderCategorySelectOptions();
+                    renderCategoriesListBox();
+                });
+        }
+
+        function renderCategorySelectOptions() {
+            const catSelect = document.getElementById('f-category');
+            if (!catSelect) return;
+            const currentVal = catSelect.value;
+            catSelect.innerHTML = '';
+            
+            currentCategories.forEach(cat => {
+                const catId = typeof cat === 'object' ? cat.id : cat;
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                const option = document.createElement('option');
+                option.value = catId;
+                option.textContent = catName;
+                catSelect.appendChild(option);
+            });
+
+            if (currentVal && Array.from(catSelect.options).some(opt => opt.value === currentVal)) {
+                catSelect.value = currentVal;
+            }
+        }
+
+        function openCategoriesModal() {
+            renderCategoriesListBox();
+            document.getElementById('categories-modal').style.display = 'block';
+        }
+
+        function renderCategoriesListBox(editingCat = null) {
+            const box = document.getElementById('categories-list-box');
+            if (!box) return;
+            box.innerHTML = '';
+            
+            currentCategories.forEach((cat) => {
+                const catName = typeof cat === 'object' ? cat.name : cat;
+                const item = document.createElement('div');
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);';
+                
+                if (editingCat && editingCat === catName) {
+                    const safeOldName = catName.replace(/'/g, "\\'");
+                    item.innerHTML = `
+                        <input type="text" id="inline-edit-input" value="${catName.replace(/"/g, '&quot;')}" style="flex: 1; margin-right: 8px; padding: 4px 6px; margin-top: 0;" onkeydown="if(event.key==='Enter') saveInlineRename('${safeOldName}')">
+                        <div style="display: flex; gap: 5px;">
+                            <button type="button" class="btn-sm" style="background-color: #4CAF50; color: white;" onclick="saveInlineRename('${safeOldName}')">💾</button>
+                            <button type="button" class="btn-sm btn-danger" onclick="renderCategoriesListBox()">❌</button>
+                        </div>
+                    `;
+                } else {
+                    let actionsHtml = '';
+                    if (catName !== 'Інше') {
+                        const safeName = catName.replace(/'/g, "\\'");
+                        actionsHtml = `
+                            <div style="display: flex; gap: 5px;">
+                                <button type="button" class="btn-sm" onclick="startInlineEdit('${safeName}')">✏️</button>
+                                <button type="button" class="btn-sm btn-danger" onclick="removeCategoryFromList('${safeName}')">🗑</button>
+                            </div>
+                        `;
+                    }
+                    item.innerHTML = `<span>${catName}</span>${actionsHtml}`;
+                }
+                
+                box.appendChild(item);
+            });
+        }
+
+        function startInlineEdit(catName) { renderCategoriesListBox(catName); }
+
+        function saveInlineRename(oldCat) {
+            const input = document.getElementById('inline-edit-input');
+            if (!input) return;
+            const newName = input.value.trim();
+            if (!newName || newName === oldCat) { renderCategoriesListBox(); return; }
+
+            fetch(`/api/categories/${userId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ old_category: oldCat, category: newName })
+            }).then(() => loadCategories());
+        }
+
+        function addCategoryToList() {
+            const input = document.getElementById('new-cat-input');
+            const newCat = input.value.trim();
+            if (!newCat) return;
+            input.value = '';
+
+            fetch(`/api/categories/${userId}/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: newCat })
+            }).then(() => loadCategories());
+        }
+
+        function removeCategoryFromList(catName) {
+            if (catName === 'Інше') return;
+            if (confirm(`Ви дійсно хочете видалити категорію "${catName}"?`)) {
+                fetch(`/api/categories/${userId}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: catName })
+                }).then(() => loadCategories());
+            }
+        }
+
+        // Старт та авто-відкриття чернетки з URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('draft') === '1') {
+            const d_date = urlParams.get('date') || '';
+            const d_amount = urlParams.get('amount') || '';
+            const d_name = urlParams.get('name') || '';
+            const d_category = urlParams.get('category') || '';
+            const d_path = urlParams.get('path') || '';
+            setTimeout(() => { openForm('', d_date, d_amount, d_name, d_category, d_path); }, 500);
+        }
+
+        if (userId) {
+            checkUserRole();
+            loadCategories();
+            loadExpenses();
+        } else {
+            loadExpenses(); // відобразить застереження про відсутність авторизації
+        }

@@ -1,0 +1,34 @@
+body { font-family: Arial, sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .expense-card { border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: var(--tg-theme-secondary-bg-color, #f4f4f4); transition: background-color 0.3s ease; }
+        .header { display: flex; justify-content: space-between; font-weight: bold; }
+        .details { font-size: 0.9em; color: var(--tg-theme-hint-color, #888); margin-top: 5px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;}
+        .card-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        button { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+        button:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn-danger { background-color: #e53935; color: white; }
+        .btn-sm { padding: 5px 10px; font-size: 0.8em; }
+        
+        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;}
+        .modal-content { background: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 20px; border-radius: 10px; max-width: 400px; margin: 20px auto; animation: fadeInModal 0.2s ease-in-out; }
+        
+        #receipt-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); padding: 10px; box-sizing: border-box; z-index: 200; justify-content: center; align-items: center; flex-direction: column;}
+        #receipt-image { max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 8px; margin-bottom: 15px; background: white;}
+        .receipt-btn { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 0.8em;}
+        
+        .form-group { margin-bottom: 15px; display: flex; flex-direction: column; }
+        input, select { padding: 8px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 4px; background: var(--tg-theme-secondary-bg-color, #f4f4f4); color: var(--tg-theme-text-color, #000000); margin-top: 5px; }
+
+        .loading-overlay {
+            position: fixed; top: 12px; right: 15px; background: rgba(0, 0, 0, 0.75);
+            color: #ffffff; padding: 6px 14px; border-radius: 20px; font-size: 0.8em;
+            display: none; align-items: center; gap: 8px; z-index: 1000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .spinner { width: 14px; height: 14px; border: 2px solid #ffffff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes highlight { 0% { background-color: rgba(51, 144, 236, 0.35); } 100% { background-color: var(--tg-theme-secondary-bg-color, #f4f4f4); } }
+        @keyframes fadeInModal { from { opacity: 0.4; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
+        body.dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
