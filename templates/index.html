@@ -59,6 +59,23 @@
         </div>
     </div>
     
+    <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+        <label for="main-month-filter" style="font-weight: bold; font-size: 0.9em;">Місяць:</label>
+        <input type="month" id="main-month-filter" onchange="loadExpenses()" style="flex: 1; max-width: 200px; padding: 6px;">
+        <button class="btn-sm" style="background: var(--tg-theme-button-color, #3390ec);" onclick="document.getElementById('main-month-filter').value=''; loadExpenses();">Скинути</button>
+    </div>
+    
+    <div id="main-budget-summary" style="display: none; margin-bottom: 15px; padding: 10px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; background: var(--tg-theme-secondary-bg-color, #f4f4f4);">
+        <div style="display: flex; justify-content: space-between; font-size: 1em; margin-bottom: 4px;">
+            <strong>Бюджет на місяць</strong>
+            <strong id="main-budget-text">0 / — грн</strong>
+        </div>
+        <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 10px; overflow: hidden; margin-bottom: 4px;">
+            <div id="main-budget-bar" style="width: 0%; background: #4CAF50; height: 100%; transition: width 0.3s, background-color 0.3s;"></div>
+        </div>
+        <div id="main-budget-remaining" style="font-size: 0.85em; text-align: right; color: var(--tg-theme-hint-color, #888);"></div>
+    </div>
+    
     <div id="expenses-list">Завантаження...</div>
 
     <!-- Модальне вікно перегляду чека -->
