@@ -200,9 +200,41 @@ async def get_all_categories(only_active: bool = False):
         async with conn.cursor(aiomysql.DictCursor) as cur:
             query = "SELECT * FROM categories"
             if only_active: query += " WHERE is_active=1"
-            query += " ORDER BY sort_order ASC"
+            query += " ORDER BY sort_order ASC, name ASC"
             await cur.execute(query)
             return await cur.fetchall()
+
+async def create_category(id: str, name: str, sort_order: int = 999):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("INSERT INTO categories (id, name, sort_order) VALUES (%s, %s, %s)", (id, name, sort_order))
+
+async def update_category(id: str, name: str, sort_order: int, is_active: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE categories SET name=%s, sort_order=%s, is_active=%s WHERE id=%s", (name, sort_order, is_active, id))
+
+async def get_category_matrix():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            # Отримуємо всі центри, всі категорії та зв'язки
+            await cur.execute("SELECT id, name FROM centers WHERE is_active=1 ORDER BY name ASC")
+            centers = await cur.fetchall()
+            
+            await cur.execute("SELECT id, name FROM categories WHERE is_active=1 ORDER BY sort_order ASC, name ASC")
+            categories = await cur.fetchall()
+            
+            await cur.execute("SELECT center_id, category_id FROM center_categories")
+            links = await cur.fetchall()
+            
+            return {
+                "centers": centers,
+                "categories": categories,
+                "links": links
+            }
 
 async def get_categories_for_center(center_id: int):
     pool = await get_pool()

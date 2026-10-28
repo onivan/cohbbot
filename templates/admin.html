@@ -34,6 +34,8 @@
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('users')">Користувачі</button>
         <button class="tab-btn" onclick="switchTab('centers')">Центри Надії</button>
+        <button class="tab-btn" onclick="switchTab('categories')">Категорії</button>
+        <button class="tab-btn" onclick="switchTab('matrix')">Матриця ЦН-Категорії</button>
     </div>
 
     <div id="users" class="tab-content active">
@@ -73,6 +75,40 @@
         </table>
     </div>
 
+    <div id="categories" class="tab-content">
+        <button style="margin-bottom: 15px; background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openCategoryModal()">+ Додати Категорію</button>
+        <table id="categories-table">
+            <thead>
+                <tr>
+                    <th>ID (slug)</th>
+                    <th>Назва</th>
+                    <th>Сортування</th>
+                    <th>Статус</th>
+                    <th>Дії</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Categories will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="matrix" class="tab-content">
+        <p style="margin-bottom: 15px; font-weight: bold;">Відмітьте чекбоксами категорії, які доступні для відповідного Центру Надії. Зміни зберігаються автоматично.</p>
+        <div style="overflow-x: auto;">
+            <table id="matrix-table" style="min-width: 600px;">
+                <thead>
+                    <tr id="matrix-header">
+                        <!-- headers will be populated here -->
+                    </tr>
+                </thead>
+                <tbody id="matrix-body">
+                    <!-- Matrix will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Center Modal -->
     <div id="center-modal" class="modal">
         <div class="modal-content">
@@ -100,7 +136,35 @@
         </div>
     </div>
     
-    <!-- User Center Assign Modal -->
+    <!-- Category Modal -->
+    <div id="category-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="category-modal-title">Додати Категорію</h3>
+            <div class="form-group">
+                <label>ID (Тільки англ, без пробілів, напр. cat_office):</label>
+                <input type="text" id="cat-id">
+            </div>
+            <div class="form-group">
+                <label>Назва:</label>
+                <input type="text" id="cat-name">
+            </div>
+            <div class="form-group">
+                <label>Сортування (число, менше = вище):</label>
+                <input type="number" id="cat-sort" value="999">
+            </div>
+            <div class="form-group">
+                <label>Статус:</label>
+                <select id="cat-status">
+                    <option value="1">Активна</option>
+                    <option value="0">Неактивна</option>
+                </select>
+            </div>
+            <div class="actions-btn">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCategoryModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCategory()">Зберегти</button>
+            </div>
+        </div>
+    </div>
     <div id="user-modal" class="modal">
         <div class="modal-content">
             <h3>Призначити ЦН користувачу</h3>

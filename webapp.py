@@ -88,14 +88,20 @@ class CenterUpdateData(BaseModel):
 class UserCenterUpdateData(BaseModel):
     center_id: int
 
-class CategoriesData(BaseModel):
-    categories: List[str]
+class CategoryCreationData(BaseModel):
+    id: str
+    name: str
+    sort_order: int = 999
 
-class CategoryActionData(BaseModel):
-    category: str
-    old_category: Optional[str] = None
-    category_id: Optional[str] = None
-    sort_order: Optional[int] = 999
+class CategoryUpdateData(BaseModel):
+    name: str
+    sort_order: int
+    is_active: int
+
+class MatrixToggleData(BaseModel):
+    center_id: int
+    category_id: str
+    is_enabled: bool
 
 class BudgetData(BaseModel):
     target_user_id: int
@@ -185,7 +191,40 @@ async def admin_set_user_center(target_user_id: int, data: UserCenterUpdateData,
         return {"status": "ok"}
     raise HTTPException(status_code=400, detail="Помилка оновлення")
 
-@app.get("/api/admin/centers")
+@app.get("/api/admin/categories")
+async def admin_get_categories(current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    categories = await database.get_all_categories()
+    return {"status": "ok", "data": categories}
+
+@app.post("/api/admin/categories")
+async def admin_create_category(data: CategoryCreationData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    await database.create_category(data.id, data.name, data.sort_order)
+    return {"status": "ok"}
+
+@app.put("/api/admin/categories/{category_id}")
+async def admin_update_category(category_id: str, data: CategoryUpdateData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    await database.update_category(category_id, data.name, data.sort_order, data.is_active)
+    return {"status": "ok"}
+
+@app.get("/api/admin/matrix")
+async def admin_get_matrix(current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    matrix_data = await database.get_category_matrix()
+    return {"status": "ok", "data": matrix_data}
+
+@app.post("/api/admin/matrix/toggle")
+async def admin_toggle_matrix(data: MatrixToggleData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    await database.set_center_category(data.center_id, data.category_id, data.is_enabled)
+    return {"status": "ok"}
 async def admin_get_centers(current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
