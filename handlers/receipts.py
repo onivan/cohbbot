@@ -83,6 +83,11 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
         await message.answer("Будь ласка, спочатку зареєструйтеся за допомогою команди /start")
         return
 
+    user_info = users_cache[user_id_str]
+    if user_info.get('status', 'pending') != 'active' or not user_info.get('center_id'):
+        await message.answer("Ваш обліковий запис ще не активовано або вам не призначено Центр Надії. Очікуйте підтвердження від адміністратора.")
+        return
+
     msg = await message.answer("⏳ Читаю чек...")
     
     try:

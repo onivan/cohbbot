@@ -5,9 +5,10 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
 # Внутрішні модулі проєкту
-from database import users_cache, add_user, load_users
+from database import users_cache, add_user, load_users, get_all_users
 from handlers.states import UserState
 from handlers.keyboards import webapp_kb
+from bot_setup import bot
 
 router = Router()
 
@@ -20,11 +21,23 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await load_users()
         
     if user_id_str in users_cache:
-        user_name = users_cache[user_id_str].get('name', 'Користувач')
-        await message.answer(
-            f"Привіт, {user_name}! Надішліть чек або перегляньте статистику.\n(Змінити назву центру можна командою /settings, переглянути інструкцію — /help)",
-            reply_markup=webapp_kb
-        )
+        user_info = users_cache[user_id_str]
+        user_name = user_info.get('name', 'Користувач')
+        user_status = user_info.get('status', 'pending')
+        
+        if user_status == 'pending':
+            await message.answer(
+                f"Привіт, {user_name}! Вашу заявку зареєстровано. Очікуйте, поки адміністратор призначить вас до Центру Надії."
+            )
+        elif user_status == 'blocked':
+            await message.answer(
+                f"Привіт, {user_name}. Ваш обліковий запис заблоковано. Зверніться до адміністратора."
+            )
+        else:
+            await message.answer(
+                f"Привіт, {user_name}! Надішліть чек або перегляньте статистику.\n(Переглянути інструкцію — /help)",
+                reply_markup=webapp_kb
+            )
     else:
         await message.answer("Привіт! Я бот для обліку витрат. Введіть своє ім'я:")
         await state.set_state(UserState.waiting_for_name)
@@ -37,25 +50,35 @@ async def process_name(message: types.Message, state: FSMContext):
         return
         
     await state.update_data(name=message.text.strip())
-    await message.answer("Тепер введіть назву вашого центру (наприклад: ЦН Київ):")
-    await state.set_state(UserState.waiting_for_center)
+    await message.answer("Тепер введіть ваше місто проживання (наприклад: Київ):")
+    await state.set_state(UserState.waiting_for_city)
 
-@router.message(UserState.waiting_for_center)
-async def process_center(message: types.Message, state: FSMContext):
-    """Крок 2 реєстрації: отримання центру та збереження в базу"""
+@router.message(UserState.waiting_for_city)
+async def process_city(message: types.Message, state: FSMContext):
+    """Крок 2 реєстрації: отримання міста та збереження в базу"""
     if not message.text:
-        await message.answer("Будь ласка, надішліть назву центру текстом.")
+        await message.answer("Будь ласка, надішліть назву міста текстом.")
         return
         
-    center = message.text.strip()
+    city = message.text.strip()
     data = await state.get_data()
     name = data['name']
     user_id = message.from_user.id
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    await add_user(user_id, name, center, date_str)
+    await add_user(user_id=user_id, name=name, city=city, status='pending')
     await state.clear()
     await message.answer(
-        f"Приємно познайомитись, {name} з «{center}»! Тепер ви можете надсилати фото чеків або додавати витрати вручну натиснувши кнопку «Витрати».", 
-        reply_markup=webapp_kb
+        f"Приємно познайомитись, {name}! Вашу заявку зареєстровано. Очікуйте, поки адміністратор призначить вас до Центру Надії."
     )
+    
+    # Сповіщення адмінів
+    admins = [u for u in get_all_users() if str(users_cache.get(str(u['user_id']), {}).get('role', '')).strip().lower() == 'admin']
+    for admin in admins:
+        try:
+            await bot.send_message(
+                admin['user_id'],
+                f"🔔 **Нова реєстрація**\n\nКористувач: {name}\nМісто: {city}\nTelegram ID: `{user_id}`\n\nПризначте користувачу Центр Надії у веб-панелі адміна.",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass

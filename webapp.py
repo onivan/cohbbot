@@ -103,9 +103,22 @@ async def get_center(user_id: int):
     u_info = database.users_cache.get(str(user_id), {})
     return {"status": "ok", "center": u_info.get("center", "МійЦентр")}
 
+from bot_setup import bot
+
 @app.post("/api/user/{user_id}/center")
 async def set_center(user_id: int, data: CenterData):
     await database.update_user_center(user_id, data.center)
+    
+    # Сповіщення користувачу після призначення центру
+    try:
+        await bot.send_message(
+            user_id,
+            f"🎉 Вас призначено до **{data.center}**!\nТепер ви можете вносити витрати. Надішліть чек або натисніть кнопку «Витрати».",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+        
     return {"status": "ok"}
 
 

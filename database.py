@@ -50,29 +50,21 @@ async def load_users():
                     'status': r['status']
                 }
 
-async def add_user(user_id: int, name: str, center_name: str, date_str: str, role: str = 'user'):
+async def add_user(user_id: int, name: str, city: str, center_id: int = None, role: str = 'user', status: str = 'pending'):
     """Додає нового користувача в кеш та у таблицю MySQL."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT id FROM centers WHERE name = %s", (center_name,))
-            row = await cur.fetchone()
-            if row:
-                center_id = row[0]
-            else:
-                city = center_name.replace("ЦН", "").replace("цн", "").strip() or "Україна"
-                await cur.execute("INSERT INTO centers (name, city, is_active) VALUES (%s, %s, 1)", (center_name, city))
-                center_id = cur.lastrowid
-            
             await cur.execute("""
                 INSERT INTO users (telegram_id, name, city, center_id, role, status)
-                VALUES (%s, %s, %s, %s, %s, 'active')
-                ON DUPLICATE KEY UPDATE name=VALUES(name), center_id=VALUES(center_id)
-            """, (user_id, name, "Невідомо", center_id, role))
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    name=VALUES(name), city=VALUES(city), center_id=VALUES(center_id), 
+                    role=VALUES(role), status=VALUES(status)
+            """, (user_id, name, city, center_id, role, status))
             
-    users_cache[str(user_id)] = {
-        'name': name, 'center': center_name, 'center_id': center_id, 'role': role, 'status': 'active'
-    }
+    # Завантажуємо оновленого користувача в кеш, щоб отримати назву центру (якщо є)
+    await load_users()
 
 async def update_user_center(user_id: int, new_center: str):
     pool = await get_pool()

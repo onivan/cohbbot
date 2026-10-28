@@ -3,7 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 class UserState(StatesGroup):
     """Стани первинної реєстрації користувача"""
     waiting_for_name = State()    # Очікування введення імені
-    waiting_for_center = State()  # Очікування введення назви центру/підрозділу
+    waiting_for_city = State()    # Очікування введення міста (замість центру)
 
 class SettingsState(StatesGroup):
     """Стани зміни налаштувань"""
