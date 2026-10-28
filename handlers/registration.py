@@ -82,3 +82,23 @@ async def process_city(message: types.Message, state: FSMContext):
             )
         except Exception:
             pass
+
+@router.message(Command("login"))
+async def cmd_login(message: types.Message):
+    """Генерує одноразовий код для входу в веб-додаток"""
+    user_id = message.from_user.id
+    if str(user_id) not in users_cache:
+        await load_users()
+        
+    user_info = users_cache.get(str(user_id))
+    if not user_info:
+        await message.answer("Спочатку зареєструйтесь за допомогою команди /start.")
+        return
+        
+    from database import create_auth_code
+    code = await create_auth_code(user_id)
+    
+    await message.answer(
+        f"Ваш код для входу: `{code}`\n\nВін дійсний 10 хвилин. Введіть його на сторінці логіну у веб-додатку.",
+        parse_mode="Markdown"
+    )

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -9,10 +9,54 @@ import os
 import uuid
 import logging
 from datetime import datetime
-from config import WEBAPP_URL
+from itsdangerous import URLSafeSerializer, BadSignature
+from config import WEBAPP_URL, SECRET_KEY
 
 app = FastAPI(title="Expense Tracker WebApp")
 templates = Jinja2Templates(directory="templates")
+serializer = URLSafeSerializer(SECRET_KEY)
+
+from fastapi import Depends
+def get_current_user(request: Request) -> int:
+    """Витягує user_id з кукі сесії (для браузера) або з query params (якщо з бота)"""
+    # 1. Спроба отримати з кукі
+    session_cookie = request.cookies.get("session_token")
+    if session_cookie:
+        try:
+            return serializer.loads(session_cookie)
+        except BadSignature:
+            pass
+            
+    # 2. Спроба отримати з query parameters (якщо відкрито з Telegram Web App)
+    tg_user_id = request.query_params.get("user_id")
+    if tg_user_id and tg_user_id.isdigit():
+        return int(tg_user_id)
+        
+    raise HTTPException(status_code=401, detail='Unauthorized')
+
+class LoginData(BaseModel):
+    code: str
+
+@app.post("/api/auth/login")
+async def login_api(data: LoginData, response: Response):
+    user_id = await database.validate_auth_code(data.code)
+    if user_id:
+        token = serializer.dumps(user_id)
+        response.set_cookie(
+            key="session_token",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=30 * 24 * 60 * 60 # 30 днів
+        )
+        return {"status": "ok", "user_id": user_id}
+    else:
+        raise HTTPException(status_code=401, detail="Невірний або прострочений код")
+
+@app.post("/api/auth/logout")
+async def logout_api(response: Response):
+    response.delete_cookie("session_token")
+    return {"status": "ok"}
 
 # Монтування папки з фотографіями чеків
 os.makedirs("receipts", exist_ok=True)
@@ -50,6 +94,10 @@ class BudgetData(BaseModel):
     amount: float
 
 
+@app.get("/login")
+async def login_page(request: Request):
+    return templates.TemplateResponse(request=request, name="login.html", context={"request": request})
+
 @app.get("/")
 async def read_root(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context={"request": request})
@@ -60,38 +108,38 @@ async def read_root(request: Request):
 # ==========================================
 
 @app.get("/api/categories")
-async def fetch_categories():
+async def fetch_categories(current_user: int = Depends(get_current_user)):
     categories = await database.get_categories()
     return {"status": "ok", "data": categories}
 
 @app.get("/api/categories/{user_id}")
-async def fetch_user_categories(user_id: int):
+async def fetch_user_categories(user_id: int, current_user: int = Depends(get_current_user)):
     categories = await database.get_categories(user_id)
     return {"status": "ok", "data": categories}
 
 @app.post("/api/categories/{user_id}")
-async def update_user_categories(user_id: int, data: CategoriesData, admin_id: int):
+async def update_user_categories(user_id: int, data: CategoriesData, admin_id: int, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.save_user_categories(user_id, data.categories)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/add")
-async def add_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+async def add_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.add_user_category(user_id, data.category, data.sort_order)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/delete")
-async def delete_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+async def delete_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.delete_user_category(user_id, data.category)
     return {"status": "ok"}
 
 @app.post("/api/categories/{user_id}/rename")
-async def rename_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int):
+async def rename_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     if data.old_category:
@@ -99,17 +147,26 @@ async def rename_category_endpoint(user_id: int, data: CategoryActionData, admin
     return {"status": "ok"}
 
 @app.get("/api/user/{user_id}/center")
-async def get_center(user_id: int):
+async def get_center(user_id: int, current_user: int = Depends(get_current_user)):
     u_info = database.users_cache.get(str(user_id), {})
     return {"status": "ok", "center": u_info.get("center", "МійЦентр")}
 
 from bot_setup import bot
 
+from bot_setup import bot
+
 @app.post("/api/user/{user_id}/center")
-async def set_center(user_id: int, data: CenterData):
+async def set_center(user_id: int, data: CenterData, current_user: int = Depends(get_current_user)):
     await database.update_user_center(user_id, data.center)
-    
-    # Сповіщення користувачу після призначення центру
+    try:
+        await bot.send_message(
+            user_id,
+            f"✅ Вас призначено до **{data.center}**! Тепер ви можете вносити витрати.",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+    return {"status": "ok"}
     try:
         await bot.send_message(
             user_id,
@@ -123,7 +180,7 @@ async def set_center(user_id: int, data: CenterData):
 
 
 @app.get("/api/user/{user_id}/role")
-async def get_user_role(user_id: int):
+async def get_user_role(user_id: int, current_user: int = Depends(get_current_user)):
     u_info = database.users_cache.get(str(user_id), {})
     return {
         "status": "ok", 
@@ -132,14 +189,14 @@ async def get_user_role(user_id: int):
     }
 
 @app.get("/api/admin/users")
-async def get_all_users_admin(admin_id: int):
+async def get_all_users_admin(admin_id: int, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     users = database.get_all_users()
     return {"status": "ok", "data": users}
 
 @app.get("/api/budgets/{user_id}")
-async def get_budgets(user_id: int, month: str):
+async def get_budgets(user_id: int, month: str, current_user: int = Depends(get_current_user)):
     """Отримує бюджети користувача на вказаний місяць."""
     budgets = await database.get_user_budgets(user_id, month)
     # Також запускаємо діагностичну функцію
@@ -147,7 +204,7 @@ async def get_budgets(user_id: int, month: str):
     return {"status": "ok", "data": budgets, "_debug": debug_data}
 
 @app.post("/api/admin/budgets")
-async def set_budget_admin(admin_id: int, data: BudgetData):
+async def set_budget_admin(admin_id: int, data: BudgetData, current_user: int = Depends(get_current_user)):
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
         
@@ -165,7 +222,7 @@ async def set_budget_admin(admin_id: int, data: BudgetData):
 # ==========================================
 
 @app.post("/api/upload/{user_id}")
-async def upload_receipt(user_id: int, file: UploadFile = File(...)):
+async def upload_receipt(user_id: int, file: UploadFile = File(...), current_user: int = Depends(get_current_user)):
     dt = datetime.now()
     year = dt.strftime("%Y")
     month = dt.strftime("%m")
@@ -197,7 +254,7 @@ async def upload_receipt(user_id: int, file: UploadFile = File(...)):
 # ==========================================
 
 @app.get("/api/expenses/{user_id}")
-async def get_expenses(user_id: int):
+async def get_expenses(user_id: int, current_user: int = Depends(get_current_user)):
     expenses = await database.get_user_expenses(user_id)
     first_exp = expenses[0] if expenses else {}
     return {
@@ -211,7 +268,7 @@ async def get_expenses(user_id: int):
     }
 
 @app.post("/api/expenses/{user_id}")
-async def create_expense(user_id: int, data: ExpenseData):
+async def create_expense(user_id: int, data: ExpenseData, current_user: int = Depends(get_current_user)):
     # Очікується рядок: [date, user_id, amount, expense_name, category, file_path]
     row_data = [data.date, str(user_id), data.amount, data.expense_name, data.category, data.file_path]
     expense_id = await database.add_expense(row_data)
@@ -232,7 +289,7 @@ async def create_expense(user_id: int, data: ExpenseData):
     return {"status": "ok", "expense_id": expense_id}
 
 @app.put("/api/expenses/{user_id}/{expense_id}")
-async def edit_expense(user_id: int, expense_id: str, data: ExpenseData):
+async def edit_expense(user_id: int, expense_id: str, data: ExpenseData, current_user: int = Depends(get_current_user)):
     row_data = [data.date, str(user_id), data.amount, data.expense_name, data.category, data.file_path]
     success = await database.update_expense(expense_id, user_id, row_data)
     if not success:
@@ -240,7 +297,7 @@ async def edit_expense(user_id: int, expense_id: str, data: ExpenseData):
     return {"status": "ok"}
 
 @app.delete("/api/expenses/{user_id}/{expense_id}")
-async def remove_expense(user_id: int, expense_id: str):
+async def remove_expense(user_id: int, expense_id: str, current_user: int = Depends(get_current_user)):
     success = await database.delete_expense(expense_id, user_id)
     if not success:
         raise HTTPException(status_code=404, detail="Запис не знайдено або немає доступу")

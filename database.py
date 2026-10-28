@@ -76,14 +76,17 @@ async def update_user_center(user_id: int, new_center: str):
                 center_id = row[0]
             else:
                 city = new_center.replace("ЦН", "").replace("цн", "").strip() or "Україна"
-                await cur.execute("INSERT INTO centers (name, city) VALUES (%s, %s)", (new_center, city))
+                await cur.execute("INSERT INTO centers (name, city, is_active) VALUES (%s, %s, 1)", (new_center, city))
                 center_id = cur.lastrowid
                 
-            await cur.execute("UPDATE users SET center_id = %s WHERE telegram_id = %s", (center_id, user_id))
+            await cur.execute("UPDATE users SET center_id = %s, status = 'active' WHERE telegram_id = %s", (center_id, user_id))
     
     if str(user_id) in users_cache:
         users_cache[str(user_id)]['center'] = new_center
         users_cache[str(user_id)]['center_id'] = center_id
+        users_cache[str(user_id)]['status'] = 'active'
+        
+    return center_id
 
 def is_admin(user_id: int) -> bool:
     return str(users_cache.get(str(user_id), {}).get('role', '')).strip().lower() == 'admin'
@@ -334,4 +337,38 @@ async def log_api_usage(user_id: int, user_name: str, input_tokens: int, output_
                 INSERT INTO api_logs (user_id, user_name, input_tokens, output_tokens, estimated_cost) 
                 VALUES (%s, %s, %s, %s, %s)
             """, (user_id, user_name, input_tokens, output_tokens, estimated_cost))
+
+# ==========================================
+# 6. АВТЕНТИФІКАЦІЯ
+# ==========================================
+
+async def create_auth_code(user_id: int) -> str:
+    """Генерує та зберігає 6-значний код для входу в веб-додаток."""
+    import random
+    code = f"{random.randint(100000, 999999)}"
+    # Код дійсний 10 хвилин
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                INSERT INTO auth_codes (code, telegram_id, expires_at)
+                VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL 10 MINUTE))
+                ON DUPLICATE KEY UPDATE code = code
+            """, (code, user_id))
+    return code
+
+async def validate_auth_code(code: str) -> int:
+    """Перевіряє код та повертає user_id. Якщо недійсний - повертає None."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT telegram_id FROM auth_codes
+                WHERE code = %s AND is_used = 0 AND expires_at > NOW()
+            """, (code,))
+            row = await cur.fetchone()
+            if row:
+                await cur.execute("UPDATE auth_codes SET is_used = 1 WHERE code = %s", (code,))
+                return row['telegram_id']
+    return None
 

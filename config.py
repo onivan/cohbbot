@@ -1,4 +1,5 @@
 import os
+import random
 from dotenv import load_dotenv
 
 # Завантажуємо .env файл з папки проєкту
@@ -10,6 +11,7 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 WEBAPP_URL = os.getenv("WEBAPP_URL")
 PORT = int(os.getenv("PORT", 8000))
 DEBUG_DIAGNOSTICS = os.getenv("DEBUG_DIAGNOSTICS", "False").lower() == "true"
+SECRET_KEY = os.getenv("SECRET_KEY", "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=32))) # Ключ для підпису куків
 
 # MySQL Database Settings
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
