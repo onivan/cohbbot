@@ -77,7 +77,7 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
     user_id_str = str(user_id)
     
     if user_id_str not in users_cache:
-        await asyncio.to_thread(load_users)
+        await load_users()
         
     if user_id_str not in users_cache:
         await message.answer("Будь ласка, спочатку зареєструйтеся за допомогою команди /start")
@@ -97,7 +97,7 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
         await asyncio.to_thread(image.load)
         
         # Отримуємо список категорій користувача з бази
-        raw_categories = await asyncio.to_thread(get_categories, user_id)
+        raw_categories = await get_categories(user_id)
         
         # Перетворюємо словники/рядки у чистий список текстових назв
         valid_categories = []

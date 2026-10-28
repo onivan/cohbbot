@@ -61,12 +61,12 @@ async def read_root(request: Request):
 
 @app.get("/api/categories")
 async def fetch_categories():
-    categories = await asyncio.to_thread(database.get_categories)
+    categories = await database.get_categories()
     return {"status": "ok", "data": categories}
 
 @app.get("/api/categories/{user_id}")
 async def fetch_user_categories(user_id: int):
-    categories = await asyncio.to_thread(database.get_categories, user_id)
+    categories = await database.get_categories(user_id)
     return {"status": "ok", "data": categories}
 
 @app.post("/api/categories/{user_id}")

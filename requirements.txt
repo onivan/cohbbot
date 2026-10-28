@@ -18,3 +18,8 @@ google-cloud-billing
 
 # Image Processing (Pillow)
 Pillow
+
+# MySQL Database Driver
+aiomysql
+PyMySQL
+cryptography

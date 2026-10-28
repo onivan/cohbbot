@@ -31,8 +31,8 @@ async def start_bot():
     await dp.start_polling(bot)
 
 async def main():
-    # 1. Завантажуємо користувачів із Sheets
-    await asyncio.to_thread(database.load_users)
+    # 1. Завантажуємо користувачів із MySQL
+    await database.load_users()
     
     # Запускаємо одночасно FastAPI (uvicorn) та Telegram Polling
     await asyncio.gather(

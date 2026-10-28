@@ -17,7 +17,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     user_id_str = str(message.from_user.id)
     
     if user_id_str not in users_cache:
-        await asyncio.to_thread(load_users)
+        await load_users()
         
     if user_id_str in users_cache:
         user_name = users_cache[user_id_str].get('name', 'Користувач')
