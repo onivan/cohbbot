@@ -54,7 +54,7 @@
   - Ендпоінт валідації коду `/api/auth/login` та видача HTTP-only cookie / токена сесії.
 - [x] 2.3. Middleware/залежність перевірки авторизації у FastAPI для захисту маршрутів.
 - [x] 2.4. Тестування входу в браузері.
-- [ ] 2.5. **Git commit**: `Add browser authentication via Telegram OTP`.
+- [x] 2.5. **Git commit**: `Add browser authentication via Telegram OTP`.
 
 ---
 
