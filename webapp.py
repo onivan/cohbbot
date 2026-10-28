@@ -75,8 +75,18 @@ class ExpenseData(BaseModel):
     file_path: Optional[str] = ""
     msg_id: Optional[int] = None
 
-class CenterData(BaseModel):
-    center: str
+class CenterCreationData(BaseModel):
+    name: str
+    city: str
+    is_active: int = 1
+
+class CenterUpdateData(BaseModel):
+    name: str
+    city: str
+    is_active: int
+
+class UserCenterUpdateData(BaseModel):
+    center_id: int
 
 class CategoriesData(BaseModel):
     categories: List[str]
@@ -112,39 +122,10 @@ async def fetch_categories(current_user: int = Depends(get_current_user)):
     categories = await database.get_categories()
     return {"status": "ok", "data": categories}
 
-@app.get("/api/categories/{user_id}")
-async def fetch_user_categories(user_id: int, current_user: int = Depends(get_current_user)):
-    categories = await database.get_categories(user_id)
+@app.get("/api/categories/{center_id}")
+async def fetch_center_categories(center_id: int, current_user: int = Depends(get_current_user)):
+    categories = await database.get_categories_for_center(center_id)
     return {"status": "ok", "data": categories}
-
-@app.post("/api/categories/{user_id}")
-async def update_user_categories(user_id: int, data: CategoriesData, admin_id: int, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(admin_id):
-        raise HTTPException(status_code=403, detail="Доступ заборонено")
-    await database.save_user_categories(user_id, data.categories)
-    return {"status": "ok"}
-
-@app.post("/api/categories/{user_id}/add")
-async def add_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(admin_id):
-        raise HTTPException(status_code=403, detail="Доступ заборонено")
-    await database.add_user_category(user_id, data.category, data.sort_order)
-    return {"status": "ok"}
-
-@app.post("/api/categories/{user_id}/delete")
-async def delete_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(admin_id):
-        raise HTTPException(status_code=403, detail="Доступ заборонено")
-    await database.delete_user_category(user_id, data.category)
-    return {"status": "ok"}
-
-@app.post("/api/categories/{user_id}/rename")
-async def rename_category_endpoint(user_id: int, data: CategoryActionData, admin_id: int, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(admin_id):
-        raise HTTPException(status_code=403, detail="Доступ заборонено")
-    if data.old_category:
-        await database.rename_user_category(user_id, data.old_category, data.category)
-    return {"status": "ok"}
 
 @app.get("/api/user/{user_id}/center")
 async def get_center(user_id: int, current_user: int = Depends(get_current_user)):
@@ -153,30 +134,7 @@ async def get_center(user_id: int, current_user: int = Depends(get_current_user)
 
 from bot_setup import bot
 
-from bot_setup import bot
-
-@app.post("/api/user/{user_id}/center")
-async def set_center(user_id: int, data: CenterData, current_user: int = Depends(get_current_user)):
-    await database.update_user_center(user_id, data.center)
-    try:
-        await bot.send_message(
-            user_id,
-            f"✅ Вас призначено до **{data.center}**! Тепер ви можете вносити витрати.",
-            parse_mode="Markdown"
-        )
-    except Exception:
-        pass
-    return {"status": "ok"}
-    try:
-        await bot.send_message(
-            user_id,
-            f"🎉 Вас призначено до **{data.center}**!\nТепер ви можете вносити витрати. Надішліть чек або натисніть кнопку «Витрати».",
-            parse_mode="Markdown"
-        )
-    except Exception:
-        pass
-        
-    return {"status": "ok"}
+# @app.post("/api/user/{user_id}/center") - ВИДАЛЕНО, тепер адмін призначає ЦН
 
 
 @app.get("/api/user/{user_id}/role")
@@ -188,12 +146,69 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
         "name": u_info.get("name", "Невідомо")
     }
 
+# ==========================================
+# ADMIN PANEL ENDPOINTS
+# ==========================================
+
+@app.get("/admin")
+async def admin_page(request: Request, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return templates.TemplateResponse(request=request, name="admin.html", context={"request": request})
+
 @app.get("/api/admin/users")
-async def get_all_users_admin(admin_id: int, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(admin_id):
+async def admin_get_users(current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
-    users = database.get_all_users()
+    users = await database.get_all_users_details()
     return {"status": "ok", "data": users}
+
+@app.put("/api/admin/users/{target_user_id}/center")
+async def admin_set_user_center(target_user_id: int, data: UserCenterUpdateData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    
+    success = await database.admin_set_user_center(target_user_id, data.center_id)
+    if success:
+        try:
+            # Отримуємо назву центру для повідомлення
+            centers = await database.get_centers()
+            center_name = next((c['name'] for c in centers if c['id'] == data.center_id), "ЦН")
+            
+            await bot.send_message(
+                target_user_id,
+                f"🎉 Вас призначено до **{center_name}**!\nТепер ви можете вносити витрати. Надішліть чек або натисніть кнопку «Витрати».",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"Не вдалося відправити повідомлення користувачу {target_user_id}: {e}")
+        return {"status": "ok"}
+    raise HTTPException(status_code=400, detail="Помилка оновлення")
+
+@app.get("/api/admin/centers")
+async def admin_get_centers(current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    centers = await database.get_centers()
+    return {"status": "ok", "data": centers}
+
+@app.post("/api/admin/centers")
+async def admin_create_center(data: CenterCreationData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    center_id = await database.create_center(data.name, data.city, data.is_active)
+    return {"status": "ok", "center_id": center_id}
+
+@app.put("/api/admin/centers/{center_id}")
+async def admin_update_center(center_id: int, data: CenterUpdateData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    success = await database.update_center_details(center_id, data.name, data.city, data.is_active)
+    return {"status": "ok", "success": success}
+
+# ==========================================
+# BUDGETS ENDPOINTS
+# ==========================================
 
 @app.get("/api/budgets/{user_id}")
 async def get_budgets(user_id: int, month: str, current_user: int = Depends(get_current_user)):

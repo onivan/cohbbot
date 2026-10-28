@@ -112,6 +112,43 @@ async def get_centers(only_active: bool = False):
             await cur.execute(query)
             return await cur.fetchall()
 
+async def get_all_users_details() -> list:
+    """Отримує детальний список користувачів для панелі адміна."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT u.telegram_id, u.name, u.city, u.role, u.status, u.center_id, c.name as center_name 
+                FROM users u
+                LEFT JOIN centers c ON u.center_id = c.id
+                ORDER BY u.name ASC
+            """)
+            return await cur.fetchall()
+
+async def create_center(name: str, city: str, is_active: int = 1) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("INSERT INTO centers (name, city, is_active) VALUES (%s, %s, %s)", (name, city, is_active))
+            return cur.lastrowid
+
+async def update_center_details(center_id: int, name: str, city: str, is_active: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE centers SET name=%s, city=%s, is_active=%s WHERE id=%s", (name, city, is_active, center_id))
+            return cur.rowcount > 0
+
+async def admin_set_user_center(user_id: int, center_id: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE users SET center_id = %s, status = 'active' WHERE telegram_id = %s", (center_id, user_id))
+            if cur.rowcount > 0:
+                await load_users() # Оновлюємо кеш
+                return True
+    return False
+
 # ==========================================
 # 2. КАТЕГОРІЇ
 # ==========================================
@@ -188,10 +225,8 @@ async def set_center_category(center_id: int, category_id: str, is_enabled: bool
                 await cur.execute("DELETE FROM center_categories WHERE center_id=%s AND category_id=%s", (center_id, category_id))
 
 # Заглушки для сумісності з Phase 0 webapp
-async def add_user_category(user_id: int, category_name: str, sort_order: int = 999): pass
-async def delete_user_category(user_id: int, category_name: str): pass
-async def rename_user_category(user_id: int, old_name: str, new_name: str): pass
-async def save_user_categories(user_id: int, categories_list: list): pass
+# Видалено user-specific категорійні функції
+
 
 
 # ==========================================

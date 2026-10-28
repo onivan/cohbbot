@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель адміністратора</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 10px 15px; border: none; background: #ddd; cursor: pointer; border-radius: 5px; font-weight: bold; }
+        .tab-btn.active { background: #4CAF50; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100; }
+        .modal-content { background: white; padding: 20px; border-radius: 8px; max-width: 500px; margin: 0 auto; color: #000; }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; box-sizing: border-box; }
+        .actions-btn { display: flex; gap: 10px; justify-content: flex-end; }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Панель адміністратора</h2>
+        <a href="/" style="color: #4CAF50; text-decoration: none; font-weight: bold;">← На головну</a>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('users')">Користувачі</button>
+        <button class="tab-btn" onclick="switchTab('centers')">Центри Надії</button>
+    </div>
+
+    <div id="users" class="tab-content active">
+        <table id="users-table">
+            <thead>
+                <tr>
+                    <th>ПІБ</th>
+                    <th>Місто</th>
+                    <th>ID</th>
+                    <th>Роль</th>
+                    <th>Статус</th>
+                    <th>ЦН</th>
+                    <th>Дії</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Users will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="centers" class="tab-content">
+        <button style="margin-bottom: 15px; background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openCenterModal()">+ Додати ЦН</button>
+        <table id="centers-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Назва</th>
+                    <th>Місто</th>
+                    <th>Статус</th>
+                    <th>Дії</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Centers will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Center Modal -->
+    <div id="center-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="center-modal-title">Додати ЦН</h3>
+            <input type="hidden" id="c-id">
+            <div class="form-group">
+                <label>Назва:</label>
+                <input type="text" id="c-name">
+            </div>
+            <div class="form-group">
+                <label>Місто:</label>
+                <input type="text" id="c-city">
+            </div>
+            <div class="form-group">
+                <label>Статус:</label>
+                <select id="c-status">
+                    <option value="1">Активний</option>
+                    <option value="0">Неактивний</option>
+                </select>
+            </div>
+            <div class="actions-btn">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCenterModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCenter()">Зберегти</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Center Assign Modal -->
+    <div id="user-modal" class="modal">
+        <div class="modal-content">
+            <h3>Призначити ЦН користувачу</h3>
+            <p id="u-name-display" style="font-weight: bold;"></p>
+            <input type="hidden" id="u-id">
+            <div class="form-group">
+                <label>Оберіть Центр Надії:</label>
+                <select id="u-center-select"></select>
+            </div>
+            <div class="actions-btn">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeUserModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveUserCenter()">Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>
