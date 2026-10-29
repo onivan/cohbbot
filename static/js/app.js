@@ -235,13 +235,12 @@ window.fetch = function() {
             if (centerFilter) {
                 centerFilter.value = centerId;
             }
-            // Відкриваємо модальне вікно адміна та перемикаємо на обраний центр
+            // Відкриваємо модальне вікно адміна для обраного центру
             const adminSelect = document.getElementById('admin-center-select');
             if (adminSelect) {
                 adminSelect.value = centerId;
-                openAdminModal();
-                onAdminCenterChange();
             }
+            openAdminModal(centerId);
         }
         
         
@@ -477,8 +476,26 @@ window.fetch = function() {
         let adminCurrentTab = 'budgets';
         let adminTargetCategories = [];
 
-        function openAdminModal() {
-            document.getElementById('admin-budgets-modal').style.display = 'block';
+        function openAdminModal(specificCenterId = null) {
+            const modal = document.getElementById('admin-budgets-modal');
+            const selectContainer = document.getElementById('admin-center-select-container');
+            const adminSelect = document.getElementById('admin-center-select');
+            const titleEl = document.getElementById('admin-modal-title');
+
+            modal.style.display = 'block';
+
+            if (specificCenterId) {
+                // Приховуємо вибір центру, адже центр уже обрано з картки
+                if (selectContainer) selectContainer.style.display = 'none';
+                if (adminSelect) adminSelect.value = specificCenterId;
+                
+                const optText = adminSelect && adminSelect.options[adminSelect.selectedIndex] ? adminSelect.options[adminSelect.selectedIndex].text : '';
+                if (titleEl) titleEl.textContent = `Панель ЦН: ${optText}`;
+            } else {
+                if (selectContainer) selectContainer.style.display = 'block';
+                if (titleEl) titleEl.textContent = 'Панель адміністратора';
+            }
+
             onAdminCenterChange();
         }
 

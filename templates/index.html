@@ -141,10 +141,10 @@
         <!-- Модальне вікно "Адміністратор" (Керування бюджетами та категоріями) -->
     <div id="admin-budgets-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
         <div class="modal-content" style="max-width: 500px; margin: 20px auto;">
-            <h3 style="margin-top: 0; margin-bottom: 12px;">Панель адміністратора</h3>
+            <h3 id="admin-modal-title" style="margin-top: 0; margin-bottom: 12px;">Панель адміністратора</h3>
             
-            <div style="margin-bottom: 15px;">
-                <label for="admin-user-select" style="font-weight: bold; font-size: 0.9em; display: block; margin-bottom: 4px;">Оберіть центр:</label>
+            <div id="admin-center-select-container" style="margin-bottom: 15px;">
+                <label for="admin-center-select" style="font-weight: bold; font-size: 0.9em; display: block; margin-bottom: 4px;">Оберіть центр:</label>
                 <select id="admin-center-select" style="width: 100%; padding: 6px;" onchange="onAdminCenterChange()">
                     <option value="">-- Оберіть центр --</option>
                 </select>
