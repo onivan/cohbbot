@@ -83,7 +83,11 @@ window.fetch = function() {
             if (mainMonthFilter) {
                 mainMonthFilter.value = currentMonth;
             }
-            loadExpenses();
+            if (currentUserRole === 'admin' && !currentUserCenterId && (!document.getElementById('main-center-filter') || document.getElementById('main-center-filter').value === "0")) {
+                loadAdminCentersSummary();
+            } else {
+                loadExpenses();
+            }
         }
         
         function toggleDebug(panelId) {
@@ -94,21 +98,150 @@ window.fetch = function() {
         }
         
         let currentUserRole = 'user';
+        let currentUserCenterId = null;
 
-                function checkUserRole() {
-            if (!userId) return;
+                let isRoleChecked = false;
+
+        function checkUserRole() {
+            if (!userId) {
+                console.warn("checkUserRole: userId is null");
+                return;
+            }
             fetch(`/api/user/${userId}/role`)
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) throw new Error(`Role HTTP error ${r.status}`);
+                    return r.json();
+                })
                 .then(res => {
+                    isRoleChecked = true;
                     currentUserRole = res.role;
+                    currentUserCenterId = res.center_id;
                     if (currentUserRole === 'admin') {
                         const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
                         if (adminBtn) adminBtn.style.display = 'inline-block';
                         loadCentersForAdmin();
                         loadCentersForAdminFilter();
+
+                        // Якщо це адмін БЕЗ центру, за замовчуванням показуємо зведення центрів
+                        if (!currentUserCenterId) {
+                            loadAdminCentersSummary();
+                        } else {
+                            loadExpenses();
+                        }
+                    } else {
+                        loadExpenses();
                     }
                 })
-                .catch(err => console.error("Error fetching user role:", err));
+                .catch(err => {
+                    console.error("Error fetching user role:", err);
+                    const expensesList = document.getElementById('expenses-list');
+                    if (expensesList) {
+                        expensesList.innerHTML = `<div style="color: red; padding: 15px;">Помилка отримання ролі: ${err.message}</div>`;
+                    }
+                });
+        }
+
+        function loadAdminCentersSummary() {
+            const filterMonth = document.getElementById('main-month-filter');
+            const monthVal = filterMonth ? filterMonth.value : '';
+            const summaryView = document.getElementById('admin-centers-summary-view');
+            const summaryList = document.getElementById('admin-centers-summary-list');
+            const expensesList = document.getElementById('expenses-list');
+            const totalHeader = document.getElementById('total-header');
+
+            if (!summaryView || !summaryList) {
+                console.error("Summary elements not found in DOM");
+                if (expensesList) expensesList.innerHTML = '<div style="color: red; padding: 20px;">Помилка розмітки: admin-centers-summary-view не знайдено</div>';
+                return;
+            }
+
+            summaryView.style.display = 'block';
+            if (expensesList) expensesList.style.display = 'none';
+
+            let url = '/api/admin/centers/summary';
+            if (monthVal) url += `?month=${monthVal}`;
+
+            summaryList.innerHTML = '<div style="text-align: center; color: var(--tg-theme-hint-color, #888); padding: 15px;">Завантаження зведення по центрах...</div>';
+
+            fetch(url)
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error(`HTTP помилка ${r.status}: ${r.statusText}`);
+                    }
+                    return r.json();
+                })
+                .then(res => {
+                    if (res.status !== 'ok') {
+                        throw new Error(res.detail || "Сервер повернув помилку");
+                    }
+                    const centers = res.data || [];
+                    if (centers.length === 0) {
+                        summaryList.innerHTML = '<div style="color: #888; text-align: center; padding: 15px;">Немає зареєстрованих або активних центрів.</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    let grandSpent = 0;
+                    let grandBudget = 0;
+
+                    centers.forEach(c => {
+                        const spent = c.total_spent || 0;
+                        const budget = c.total_budget || 0;
+                        const hasBudget = c.has_budget;
+                        grandSpent += spent;
+                        if (hasBudget) grandBudget += budget;
+
+                        let percent = 0;
+                        if (hasBudget && budget > 0) percent = Math.min(100, Math.round((spent / budget) * 100));
+                        else if (spent > 0) percent = 100;
+
+                        const barColor = getProgressBarColor(percent);
+                        const budgetText = hasBudget ? (budget > 0 ? budget.toFixed(0) + ' грн' : '0 грн') : 'не встановлено';
+
+                        html += `
+                            <div class="expense-card" style="cursor: pointer; margin-bottom: 12px; transition: transform 0.1s;" onclick="selectCenterForAdmin(${c.id})" title="Натисніть, щоб відкрити панель ЦН">
+                                <div class="header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <strong>🏢 ${c.name} (${c.city || 'ЦН'})</strong>
+                                    <span style="font-weight: bold; color: var(--tg-theme-button-color, #2481cc);">⚙️ Керувати ➔</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
+                                    <span>Витрати: <b>${spent.toFixed(0)} грн</b></span>
+                                    <span>Бюджет: <b>${budgetText}</b></span>
+                                </div>
+                                <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
+                                    <div style="width: ${hasBudget ? percent : (spent > 0 ? 100 : 0)}%; background: ${hasBudget ? barColor : '#9e9e9e'}; height: 100%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    summaryList.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error("loadAdminCentersSummary error:", err);
+                    summaryList.innerHTML = `
+                        <div style="color: red; padding: 15px; background: #ffebee; border-radius: 8px; border: 1px solid #ffcdd2;">
+                            <b>⚠️ Помилка завантаження зведення центрів:</b><br>
+                            <code>${err.message}</code><br><br>
+                            <span style="font-size: 0.85em; color: #555;">URL: ${url}</span>
+                        </div>
+                    `;
+                });
+        }
+
+        function selectCenterForAdmin(centerId) {
+            // Встановлюємо фільтр центрів і завантажуємо витрати цього центру
+            const centerFilter = document.getElementById('main-center-filter');
+            if (centerFilter) {
+                centerFilter.value = centerId;
+            }
+            // Відкриваємо модальне вікно адміна та перемикаємо на обраний центр
+            const adminSelect = document.getElementById('admin-center-select');
+            if (adminSelect) {
+                adminSelect.value = centerId;
+                openAdminModal();
+                onAdminCenterChange();
+            }
         }
         
         
@@ -833,6 +966,22 @@ window.fetch = function() {
         }
 
         function loadExpenses(targetExpenseId = null) {
+            const summaryView = document.getElementById('admin-centers-summary-view');
+            const centerFilterEl = document.getElementById('main-center-filter');
+            
+            // Якщо це адмін без центру і вибрано "Всі центри (Зведений)" або фільтр не задано
+            if (currentUserRole === 'admin' && !currentUserCenterId && (!centerFilterEl || centerFilterEl.value === "0")) {
+                if (summaryView) summaryView.style.display = 'block';
+                const expensesList = document.getElementById('expenses-list');
+                if (expensesList) expensesList.style.display = 'none';
+                loadAdminCentersSummary();
+                return;
+            } else {
+                if (summaryView) summaryView.style.display = 'none';
+                const expensesList = document.getElementById('expenses-list');
+                if (expensesList) expensesList.style.display = 'block';
+            }
+
             if (!userId) {
                 const debugData = JSON.stringify(tg.initDataUnsafe, null, 2);
                 const currentUrl = window.location.href;
@@ -1199,7 +1348,7 @@ window.fetch = function() {
         if (userId) {
             checkUserRole();
             loadCategories();
-            loadExpenses();
         } else {
+            console.warn("userId not found on start, calling loadExpenses()");
             loadExpenses(); // відобразить застереження про відсутність авторизації
         }

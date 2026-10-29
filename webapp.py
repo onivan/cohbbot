@@ -91,7 +91,7 @@ class CenterUpdateData(BaseModel):
     is_active: int
 
 class UserCenterUpdateData(BaseModel):
-    center_id: int
+    center_id: Optional[int] = None
 
 class CategoryCreationData(BaseModel):
     id: str
@@ -160,7 +160,8 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
     return {
         "status": "ok", 
         "role": u_info.get("role", "user"),
-        "name": u_info.get("name", "Невідомо")
+        "name": u_info.get("name", "Невідомо"),
+        "center_id": u_info.get("center_id")
     }
 
 # ==========================================
@@ -187,18 +188,19 @@ async def admin_set_user_center(target_user_id: int, data: UserCenterUpdateData,
     
     success = await database.admin_set_user_center(target_user_id, data.center_id)
     if success:
-        try:
-            # Отримуємо назву центру для повідомлення
-            centers = await database.get_centers()
-            center_name = next((c['name'] for c in centers if c['id'] == data.center_id), "ЦН")
-            
-            await bot.send_message(
-                target_user_id,
-                f"🎉 Вас призначено до **{center_name}**!\nТепер ви можете вносити витрати. Надішліть чек або натисніть кнопку «Витрати».",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logging.error(f"Не вдалося відправити повідомлення користувачу {target_user_id}: {e}")
+        if data.center_id:
+            try:
+                # Отримуємо назву центру для повідомлення
+                centers = await database.get_centers()
+                center_name = next((c['name'] for c in centers if c['id'] == data.center_id), "ЦН")
+                
+                await bot.send_message(
+                    target_user_id,
+                    f"🎉 Вас призначено до **{center_name}**!\nТепер ви можете вносити витрати. Надішліть чек або натисніть кнопку «Витрати».",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"Не вдалося відправити повідомлення користувачу {target_user_id}: {e}")
         return {"status": "ok"}
     raise HTTPException(status_code=400, detail="Помилка оновлення")
 
@@ -236,6 +238,13 @@ async def admin_toggle_matrix(data: MatrixToggleData, current_user: int = Depend
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.set_center_category(data.center_id, data.category_id, data.is_enabled)
     return {"status": "ok"}
+
+@app.get("/api/admin/centers/summary")
+async def admin_get_centers_summary(month: Optional[str] = None, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    summary = await database.get_centers_summary(month)
+    return {"status": "ok", "data": summary}
 
 @app.get("/api/admin/centers")
 async def admin_get_centers(current_user: int = Depends(get_current_user)):

@@ -140,14 +140,13 @@ function closeUserModal() {
 
 async function saveUserCenter() {
     const userId = document.getElementById('u-id').value;
-    const centerId = document.getElementById('u-center-select').value;
-    
-    if(!centerId) return alert('Оберіть ЦН');
+    const centerVal = document.getElementById('u-center-select').value;
+    const centerId = centerVal ? parseInt(centerVal) : null;
     
     const res = await fetchWithAuth(`/api/admin/users/${userId}/center`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({center_id: parseInt(centerId)})
+        body: JSON.stringify({center_id: centerId})
     });
     
     if(res && res.ok) {

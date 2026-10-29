@@ -46,7 +46,15 @@
         <div id="main-budget-remaining" style="font-size: 0.85em; text-align: right; color: var(--tg-theme-hint-color, #888);"></div>
     </div>
     
-    <div id="expenses-list">Завантаження...</div>
+    <!-- Контейнер для списку центрів (для адміна без центру) -->
+    <div id="admin-centers-summary-view" style="display: none; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; margin-bottom: 10px;">Зведення по Центрах Надії</h3>
+        <div id="admin-centers-summary-list" style="min-height: 50px;">Завантаження зведення...</div>
+    </div>
+    
+    <div id="expenses-list">
+        <div style="text-align: center; color: var(--tg-theme-hint-color, #888); padding: 20px;">Завантаження даних...</div>
+    </div>
 
     <!-- Модальне вікно перегляду чека -->
     <div id="receipt-modal">

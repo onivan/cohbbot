@@ -112,6 +112,52 @@ async def get_centers(only_active: bool = False):
             await cur.execute(query)
             return await cur.fetchall()
 
+async def get_centers_summary(month: str = None):
+    """Отримує зведення по всіх активних центрах: підсумок витрат та бюджету на місяць."""
+    pool = await get_pool()
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+        
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT id, name, city FROM centers WHERE is_active = 1 ORDER BY name ASC")
+            centers = await cur.fetchall()
+            
+            # Підсумок бюджету по кожному центру за місяць
+            await cur.execute("""
+                SELECT center_id, SUM(amount) as total_budget
+                FROM budgets
+                WHERE month = %s
+                GROUP BY center_id
+            """, (month,))
+            budgets_raw = await cur.fetchall()
+            budgets_map = {b['center_id']: float(b['total_budget']) for b in budgets_raw}
+            
+            # Підсумок витрат по кожному центру за місяць
+            await cur.execute("""
+                SELECT center_id, SUM(amount) as total_spent
+                FROM expenses
+                WHERE DATE_FORMAT(date, '%%Y-%%m') = %s
+                GROUP BY center_id
+            """, (month,))
+            expenses_raw = await cur.fetchall()
+            expenses_map = {e['center_id']: float(e['total_spent']) for e in expenses_raw}
+            
+            result = []
+            for c in centers:
+                cid = c['id']
+                b_val = budgets_map.get(cid, 0.0)
+                e_val = expenses_map.get(cid, 0.0)
+                result.append({
+                    'id': cid,
+                    'name': c['name'],
+                    'city': c['city'],
+                    'total_budget': b_val,
+                    'total_spent': e_val,
+                    'has_budget': cid in budgets_map
+                })
+            return result
+
 async def get_all_users_details() -> list:
     """Отримує детальний список користувачів для панелі адміна."""
     pool = await get_pool()
@@ -139,11 +185,14 @@ async def update_center_details(center_id: int, name: str, city: str, is_active:
             await cur.execute("UPDATE centers SET name=%s, city=%s, is_active=%s WHERE id=%s", (name, city, is_active, center_id))
             return cur.rowcount > 0
 
-async def admin_set_user_center(user_id: int, center_id: int) -> bool:
+async def admin_set_user_center(user_id: int, center_id: int = None) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE users SET center_id = %s, status = 'active' WHERE telegram_id = %s", (center_id, user_id))
+            if center_id:
+                await cur.execute("UPDATE users SET center_id = %s, status = 'active' WHERE telegram_id = %s", (center_id, user_id))
+            else:
+                await cur.execute("UPDATE users SET center_id = NULL WHERE telegram_id = %s", (user_id,))
             if cur.rowcount > 0:
                 await load_users() # Оновлюємо кеш
                 return True
