@@ -1,4 +1,4 @@
-function parseDate(rawDate) {
+﻿function parseDate(rawDate) {
             if (!rawDate) return null;
             if (!isNaN(rawDate) && !String(rawDate).includes('-') && !String(rawDate).includes('.')) {
                 const serial = Number(rawDate);
@@ -39,8 +39,34 @@ function parseDate(rawDate) {
         }
 
         // БЕЗПЕЧНА АВТОРИЗАЦІЯ ВІД TELEGRAM (без хардкоду)
-        const user = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
-        const userId = user ? user.id : null;
+                const user = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+        let userId = user ? user.id : null;
+        
+        // Якщо WebApp відкрито у звичайному браузері, спробуємо отримати ID з мета-тега, куди бекенд міг його покласти
+        if (!userId) {
+            const metaUserId = document.querySelector('meta[name="user-id"]');
+            if (metaUserId && metaUserId.content) {
+                userId = metaUserId.content;
+            }
+        }
+        
+// Перевизначаємо fetch для автоматичного додавання заголовка авторизації
+const originalFetch = window.fetch;
+window.fetch = function() {
+    let [resource, config] = arguments;
+    if(userId) {
+        if(!config) config = {};
+        if(!config.headers) config.headers = {};
+        // Додаємо заголовок x-telegram-user-id якщо він не існує
+        if(config.headers instanceof Headers) {
+            config.headers.set('x-telegram-user-id', userId);
+        } else {
+            config.headers['x-telegram-user-id'] = userId;
+        }
+    }
+    return originalFetch(resource, config);
+};
+
                 const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
         document.getElementById('my-budget-month').value = currentMonth;
         document.getElementById('admin-budget-month').value = currentMonth;
@@ -78,7 +104,8 @@ function parseDate(rawDate) {
                     if (currentUserRole === 'admin') {
                         const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
                         if (adminBtn) adminBtn.style.display = 'inline-block';
-                        loadUsersForAdmin();
+                        loadCentersForAdmin();
+                        loadCentersForAdminFilter();
                     }
                 })
                 .catch(err => console.error("Error fetching user role:", err));
@@ -86,22 +113,43 @@ function parseDate(rawDate) {
         
         
 
+        
+        function loadCentersForAdminFilter() {
+            fetch(`/api/admin/centers?admin_id=${userId}`)
+                .then(r => r.json())
+                .then(res => {
+                    const select = document.getElementById('main-center-filter');
+                    const container = document.getElementById('admin-center-filter-container');
+                    if (res.data && select && container) {
+                        res.data.forEach(c => {
+                            const opt = document.createElement('option');
+                            opt.value = c.id;
+                            opt.textContent = c.name;
+                            select.appendChild(opt);
+                        });
+                        container.style.display = 'flex';
+                    }
+                });
+        }
+
         let allExpenses = [];      
         let currentEditIndex = -1; 
         
-        function loadUsersForAdmin() {
-            fetch(`/api/admin/users?admin_id=${userId}`)
+        function loadCentersForAdmin() {
+            fetch(`/api/admin/centers?admin_id=${userId}`)
                 .then(r => r.json())
                 .then(res => {
-                    const select = document.getElementById('admin-user-select');
-                    select.innerHTML = '<option value="">-- Оберіть користувача --</option>';
-                    if (res.data) {
-                        res.data.forEach(u => {
-                            const opt = document.createElement('option');
-                            opt.value = u.user_id;
-                            opt.textContent = `${u.name} (${u.center})`;
-                            select.appendChild(opt);
-                        });
+                    const select = document.getElementById('admin-center-select');
+                    if(select) {
+                        select.innerHTML = '<option value="">-- Оберіть центр --</option>';
+                        if (res.data) {
+                            res.data.forEach(c => {
+                                const opt = document.createElement('option');
+                                opt.value = c.id;
+                                opt.textContent = c.name;
+                                select.appendChild(opt);
+                            });
+                        }
                     }
                 });
         }
@@ -112,6 +160,22 @@ function parseDate(rawDate) {
         
         function openMyBudgetModal() {
             document.getElementById('my-budget-modal').style.display = 'block';
+            // Оновлюємо заголовок з назвою центру
+            const centerFilter = document.getElementById('main-center-filter');
+            const titleEl = document.getElementById('my-budget-title');
+            if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
+                const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text : '';
+                if (titleEl) titleEl.textContent = `Бюджет ЦН ${centerName}`;
+            } else {
+                fetch(`/api/user/${userId}/center`)
+                    .then(r => r.json())
+                    .then(res => {
+                        if (titleEl) titleEl.textContent = `Бюджет ЦН ${res.center || ''}`;
+                    })
+                    .catch(() => {
+                        if (titleEl) titleEl.textContent = 'Бюджет мого ЦН';
+                    });
+            }
             loadMyBudget();
         }
         
@@ -130,8 +194,15 @@ function parseDate(rawDate) {
             const list = document.getElementById('my-budget-list');
             list.innerHTML = 'Завантаження...';
             
+            // Якщо адмін обрав конкретний центр на головній сторінці, дивимось бюджет цього центру
+            const centerFilter = document.getElementById('main-center-filter');
+            let budgetUrl = `/api/budgets/${userId}?month=${month}`;
+            if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
+                budgetUrl = `/api/budgets/center/${centerFilter.value}?month=${month}`;
+            }
+            
             // Отримуємо бюджети
-            fetch(`/api/budgets/${userId}?month=${month}`)
+            fetch(budgetUrl)
                 .then(r => r.json())
                 .then(budgetRes => {
                     const budgets = budgetRes.data || {};
@@ -144,7 +215,7 @@ function parseDate(rawDate) {
                             "currentMonthSelected": month,
                             "expensesCount": allExpenses.length,
                             "firstExpenseRaw": allExpenses[0] || null,
-                            "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date) : null,
+                            "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date || allExpenses[0].date) : null,
                             "budgetsResult": budgets
                         }, null, 2);
                     }
@@ -156,20 +227,21 @@ function parseDate(rawDate) {
                     let totalPlanned = 0;
                     
                     allExpenses.forEach(exp => {
-                        const expDate = parseDate(exp.Date);
+                        const rawDate = exp.Date || exp.date;
+                        const expDate = parseDate(rawDate);
                         if (expDate && `${expDate.year}-${expDate.month}` === month) {
-                            const catName = exp.Category_Name || exp.Category || 'Інше';
-                            const amount = parseFloat(exp.Amount) || 0;
+                            const catName = exp.category_name || exp.Category_Name || exp.Category || 'Інше';
+                            const amount = parseFloat(exp.amount || exp.Amount) || 0;
                             
-                            // З новою структурою таблиці Expenses намагаємося взяти Category_ID
-                            let catId = String(exp.Category_ID || '').trim();
+                            // З новою структурою таблиці Expenses намагаємося взяти Category_ID / category_id
+                            let catId = String(exp.category_id || exp.Category_ID || '').trim();
                             
-                            // Fallback (для старих записів): шукаємо ID за іменем категорії
+                            // Fallback: шукаємо ID за іменем категорії
                             if (!catId || !catId.startsWith('cat_')) {
                                 catId = 'cat_other';
                                 const matchedCat = currentCategories.find(c => {
                                     const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
-                                    return cName === String(catName).trim();
+                                    return cName.toLowerCase() === String(catName).trim().toLowerCase();
                                 });
                                 if (matchedCat) {
                                     catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
@@ -193,37 +265,43 @@ function parseDate(rawDate) {
                 const catName = typeof cat === 'object' ? cat.name : cat;
                 
                 const cleanCatId = String(catId).trim();
-                const planned = budgets[cleanCatId] || 0;
+                const hasBudget = Object.prototype.hasOwnProperty.call(budgets, cleanCatId);
+                const planned = hasBudget ? budgets[cleanCatId] : 0;
                 const spent = expensesByCat[cleanCatId] || 0;
                 const remaining = planned - spent;
                         
-                        totalPlanned += planned;
-                        totalSpent += spent;
-                        
-                        let percent = 0;
-                        if (planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
-                        else if (spent > 0) percent = 100; // Витрати без бюджету
-                        
-                        let barColor = getProgressBarColor(percent);
-                        
-                        // Не показуємо категорію, якщо немає ні плану, ні витрат
-                        if (planned === 0 && spent === 0) return;
-                        
-                        html += `
-                            <div style="margin-bottom: 12px;">
-                                <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
-                                    <strong>${catName}</strong>
-                                    <span>${spent.toFixed(0)} / ${planned > 0 ? planned.toFixed(0) : '—'} грн</span>
-                                </div>
-                                <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
-                                    <div style="width: ${percent}%; background: ${barColor}; height: 100%;"></div>
-                                </div>
-                                <div style="font-size: 0.8em; color: ${remaining < 0 ? '#F44336' : 'var(--tg-theme-hint-color, #888)'}; margin-top: 2px; text-align: right;">
-                                    ${remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) : 'Залишок: ' + remaining.toFixed(0)} грн
-                                </div>
-                            </div>
-                        `;
-                    });
+                if (hasBudget) {
+                    totalPlanned += planned;
+                }
+                totalSpent += spent;
+                
+                let percent = 0;
+                if (hasBudget && planned > 0) percent = Math.min(100, Math.round((spent / planned) * 100));
+                else if (spent > 0) percent = 100; // Витрати без бюджету
+                
+                let barColor = getProgressBarColor(percent);
+                
+                const plannedDisplay = hasBudget ? (planned > 0 ? planned.toFixed(0) + ' грн' : '0 грн') : 'не встановлено';
+                let remainingDisplay = '';
+                if (hasBudget) {
+                    remainingDisplay = remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) + ' грн' : 'Залишок: ' + remaining.toFixed(0) + ' грн';
+                }
+                
+                html += `
+                    <div style="margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
+                            <strong>${catName}</strong>
+                            <span>${spent.toFixed(0)} / ${plannedDisplay}</span>
+                        </div>
+                        <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 8px; overflow: hidden;">
+                            <div style="width: ${hasBudget ? percent : (spent > 0 ? 100 : 0)}%; background: ${hasBudget ? barColor : '#9e9e9e'}; height: 100%;"></div>
+                        </div>
+                        <div style="font-size: 0.8em; color: ${remaining < 0 ? '#F44336' : 'var(--tg-theme-hint-color, #888)'}; margin-top: 2px; text-align: right;">
+                            ${remainingDisplay}
+                        </div>
+                    </div>
+                `;
+            });
                     
                     if (html === '') {
                         list.innerHTML = '<div style="text-align:center; color: #888;">Немає запланованих бюджетів та витрат у цьому місяці.</div>';
@@ -268,7 +346,7 @@ function parseDate(rawDate) {
 
         function openAdminModal() {
             document.getElementById('admin-budgets-modal').style.display = 'block';
-            onAdminUserChange();
+            onAdminCenterChange();
         }
 
         function openAdminBudgetsModal() {
@@ -279,13 +357,13 @@ function parseDate(rawDate) {
             document.getElementById('admin-budgets-modal').style.display = 'none';
         }
 
-        function onAdminUserChange() {
-            const targetUserId = document.getElementById('admin-user-select').value;
+        function onAdminCenterChange() {
+            const targetCenterId = document.getElementById('admin-center-select').value;
             const actionsDiv = document.getElementById('admin-user-actions');
             const tabBudgets = document.getElementById('admin-tab-budgets');
             const tabCategories = document.getElementById('admin-tab-categories');
             
-            if (!targetUserId) {
+            if (!targetCenterId) {
                 if (actionsDiv) actionsDiv.style.display = 'none';
                 if (tabBudgets) tabBudgets.style.display = 'none';
                 if (tabCategories) tabCategories.style.display = 'none';
@@ -308,27 +386,27 @@ function parseDate(rawDate) {
                 if (tabCategories) tabCategories.style.display = 'none';
                 if (btnBudgets) { btnBudgets.style.background = '#4CAF50'; btnBudgets.style.opacity = '1'; }
                 if (btnCategories) { btnCategories.style.background = '#666'; btnCategories.style.opacity = '0.7'; }
-                loadAdminBudgetsForUser();
+                loadAdminBudgetsForCenter();
             } else {
                 if (tabBudgets) tabBudgets.style.display = 'none';
                 if (tabCategories) tabCategories.style.display = 'block';
                 if (btnBudgets) { btnBudgets.style.background = '#666'; btnBudgets.style.opacity = '0.7'; }
                 if (btnCategories) { btnCategories.style.background = '#4CAF50'; btnCategories.style.opacity = '1'; }
-                loadAdminCategoriesForUser();
+                loadAdminCategoriesForCenter();
             }
         }
 
-        function loadAdminCategoriesForUser() {
-            const targetUserId = document.getElementById('admin-user-select').value;
+        function loadAdminCategoriesForCenter() {
+            const targetCenterId = document.getElementById('admin-center-select').value;
             const listBox = document.getElementById('admin-categories-list-box');
-            if (!targetUserId) {
+            if (!targetCenterId) {
                 if (listBox) listBox.innerHTML = 'Оберіть користувача.';
                 return;
             }
 
             if (listBox) listBox.innerHTML = 'Завантаження категорій...';
 
-            fetch(`/api/categories/${targetUserId}`)
+            fetch(`/api/categories/${targetCenterId}`)
                 .then(r => r.json())
                 .then(res => {
                     adminTargetCategories = sortCategories(res.data || []);
@@ -370,7 +448,7 @@ function parseDate(rawDate) {
                         actionsHtml = `
                             <div style="display: flex; gap: 5px;">
                                 <button type="button" class="btn-sm" onclick="startAdminInlineEdit('${safeName}')">✏️</button>
-                                <button type="button" class="btn-sm btn-danger" onclick="removeAdminUserCategory('${safeName}')">🗑</button>
+                                <button type="button" class="btn-sm btn-danger" onclick="removeAdminCenterCategory('${safeName}')">🗑</button>
                             </div>
                         `;
                     }
@@ -386,16 +464,16 @@ function parseDate(rawDate) {
         }
 
         function saveAdminCategoryRename(oldCat) {
-            const targetUserId = document.getElementById('admin-user-select').value;
+            const targetCenterId = document.getElementById('admin-center-select').value;
             const input = document.getElementById('admin-inline-edit-input');
-            if (!input || !targetUserId) return;
+            if (!input || !targetCenterId) return;
             const newName = input.value.trim();
             if (!newName || newName === oldCat) {
                 renderAdminCategoriesListBox();
                 return;
             }
 
-            fetch(`/api/categories/${targetUserId}/rename?admin_id=${userId}`, {
+            fetch(`/api/categories/${targetCenterId}/rename?admin_id=${userId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ old_category: oldCat, category: newName })
@@ -404,22 +482,22 @@ function parseDate(rawDate) {
                     alert("Помилка перейменування категорії!");
                     return;
                 }
-                loadAdminCategoriesForUser();
-                if (String(targetUserId) === String(userId)) {
+                loadAdminCategoriesForCenter();
+                if (String(targetCenterId) === String(userId)) {
                     loadCategories();
                 }
             });
         }
 
-        function addAdminUserCategory() {
-            const targetUserId = document.getElementById('admin-user-select').value;
+        function addAdminCenterCategory() {
+            const targetCenterId = document.getElementById('admin-center-select').value;
             const input = document.getElementById('admin-new-cat-input');
-            if (!input || !targetUserId) return;
+            if (!input || !targetCenterId) return;
             const newCat = input.value.trim();
             if (!newCat) return;
             input.value = '';
 
-            fetch(`/api/categories/${targetUserId}/add?admin_id=${userId}`, {
+            fetch(`/api/categories/${targetCenterId}/add?admin_id=${userId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ category: newCat })
@@ -428,18 +506,18 @@ function parseDate(rawDate) {
                     alert("Помилка додавання категорії!");
                     return;
                 }
-                loadAdminCategoriesForUser();
-                if (String(targetUserId) === String(userId)) {
+                loadAdminCategoriesForCenter();
+                if (String(targetCenterId) === String(userId)) {
                     loadCategories();
                 }
             });
         }
 
-        function removeAdminUserCategory(catName) {
-            const targetUserId = document.getElementById('admin-user-select').value;
-            if (!targetUserId || catName === 'Інше') return;
+        function removeAdminCenterCategory(catName) {
+            const targetCenterId = document.getElementById('admin-center-select').value;
+            if (!targetCenterId || catName === 'Інше') return;
             if (confirm(`Ви дійсно хочете видалити категорію "${catName}" для обраного користувача?`)) {
-                fetch(`/api/categories/${targetUserId}/delete?admin_id=${userId}`, {
+                fetch(`/api/categories/${targetCenterId}/delete?admin_id=${userId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ category: catName })
@@ -448,20 +526,20 @@ function parseDate(rawDate) {
                         alert("Помилка видалення категорії!");
                         return;
                     }
-                    loadAdminCategoriesForUser();
-                    if (String(targetUserId) === String(userId)) {
+                    loadAdminCategoriesForCenter();
+                    if (String(targetCenterId) === String(userId)) {
                         loadCategories();
                     }
                 });
             }
         }
         
-        function loadAdminBudgetsForUser() {
-            const targetUserId = document.getElementById('admin-user-select').value;
+        function loadAdminBudgetsForCenter() {
+            const targetCenterId = document.getElementById('admin-center-select').value;
             const month = document.getElementById('admin-budget-month').value;
             const list = document.getElementById('admin-budget-list');
             
-            if (!targetUserId) {
+            if (!targetCenterId) {
                 list.innerHTML = 'Оберіть користувача.';
                 return;
             }
@@ -474,9 +552,9 @@ function parseDate(rawDate) {
             
             // Отримуємо категорії, бюджети та фактичні витрати паралельно
             Promise.all([
-                fetch(`/api/categories/${targetUserId}`).then(r => r.json()),
-                fetch(`/api/budgets/${targetUserId}?month=${month}`).then(r => r.json()),
-                fetch(`/api/expenses/${targetUserId}`).then(r => r.json())
+                fetch(`/api/categories/${targetCenterId}`).then(r => r.json()),
+                fetch(`/api/budgets/center/${targetCenterId}?month=${month}`).then(r => r.json()),
+                fetch(`/api/expenses/${userId}?center_id=${targetCenterId}`).then(r => r.json())
         ])
         .then(([catRes, budgetRes, expRes]) => {
                 const userCats = sortCategories(catRes.data || []);
@@ -491,32 +569,33 @@ function parseDate(rawDate) {
                         "monthSelected": month,
                         "targetExpensesCount": targetExpenses.length,
                         "firstTargetExpenseRaw": targetExpenses[0] || null,
-                        "parsedFirstDate": targetExpenses[0] ? parseDate(targetExpenses[0].Date) : null,
+                        "parsedFirstDate": targetExpenses[0] ? parseDate(targetExpenses[0].Date || targetExpenses[0].date) : null,
                         "budgetsResult": budgets
                     }, null, 2);
                 }
                 
             
-                // Обчислюємо фактичні витрати обраного користувача
+                // Обчислюємо фактичні витрати обраного центру
                 const expensesByCat = {};
                 let totalSpent = 0;
                 let totalPlanned = 0;
                 
                 targetExpenses.forEach(exp => {
-                    const expDate = parseDate(exp.Date);
+                    const rawDate = exp.Date || exp.date;
+                    const expDate = parseDate(rawDate);
                     if (expDate && `${expDate.year}-${expDate.month}` === month) {
-                        const catName = exp.Category_Name || exp.Category || 'Інше';
-                        const amount = parseFloat(exp.Amount) || 0;
+                        const catName = exp.category_name || exp.Category_Name || exp.Category || 'Інше';
+                        const amount = parseFloat(exp.amount || exp.Amount) || 0;
                         
-                        // Беремо Category_ID якщо воно є
-                        let catId = String(exp.Category_ID || '').trim();
+                        // Беремо category_id / Category_ID якщо воно є
+                        let catId = String(exp.category_id || exp.Category_ID || '').trim();
                         
                         // Fallback для старих даних
                         if (!catId || !catId.startsWith('cat_')) {
                             catId = 'cat_other';
                             const matchedCat = userCats.find(c => {
                                 const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
-                                return cName === String(catName).trim();
+                                return cName.toLowerCase() === String(catName).trim().toLowerCase();
                             });
                             if (matchedCat) {
                                 catId = typeof matchedCat === 'object' ? matchedCat.id : matchedCat;
@@ -556,7 +635,7 @@ function parseDate(rawDate) {
                                 <div style="flex: 1; display: flex; align-items: center; justify-content: flex-end;">
                                     <input type="number" id="budget-input-${catId}" value="${planned || ''}" placeholder="0" style="width: 70px; text-align: right; margin: 0; padding: 4px;" oninput="updateAdminBudgetPreview('${catId}', ${spent})">
                                 </div>
-                                <button class="btn-sm" style="background-color: #4CAF50; padding: 4px 8px;" onclick="saveAdminBudget('${targetUserId}', '${catId}', '${month}')">💾</button>
+                                <button class="btn-sm" style="background-color: #4CAF50; padding: 4px 8px;" onclick="saveAdminBudget('${targetCenterId}', '${catId}', '${month}')">💾</button>
                             </div>
                             <div style="display: flex; justify-content: space-between; font-size: 0.8em; margin-bottom: 4px; color: var(--tg-theme-hint-color, #888);">
                                 <span>Витрачено: ${spent.toFixed(0)} грн</span>
@@ -664,7 +743,7 @@ function parseDate(rawDate) {
             }
         }
         
-        function saveAdminBudget(targetUserId, categoryId, month) {
+        function saveAdminBudget(targetCenterId, categoryId, month) {
             const input = document.getElementById(`budget-input-${categoryId}`);
             let amount = parseFloat(input.value);
             if (isNaN(amount) || amount < 0) amount = 0;
@@ -673,7 +752,7 @@ function parseDate(rawDate) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    target_user_id: parseInt(targetUserId),
+                    target_center_id: parseInt(targetCenterId),
                     month: month,
                     category_id: categoryId,
                     amount: amount
@@ -696,8 +775,20 @@ function parseDate(rawDate) {
                 summaryBox.style.display = 'none';
                 return;
             }
+
+            const centerFilter = document.getElementById('main-center-filter');
+            // Якщо обрано "Всі центри (Зведений)", не показуємо одиночний бюджет або приховуємо
+            if (centerFilter && centerFilter.value === "0" && currentUserRole === 'admin') {
+                summaryBox.style.display = 'none';
+                return;
+            }
+
+            let budgetUrl = `/api/budgets/${userId}?month=${month}`;
+            if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
+                budgetUrl = `/api/budgets/center/${centerFilter.value}?month=${month}`;
+            }
             
-            fetch(`/api/budgets/${userId}?month=${month}`)
+            fetch(budgetUrl)
                 .then(r => r.json())
                 .then(res => {
                     const budgets = res.data || {};
@@ -767,7 +858,14 @@ function parseDate(rawDate) {
                 loadingIndicator.style.display = 'flex';
             }
 
-            fetch(`/api/expenses/${userId}`)
+            let fetchUrl = `/api/expenses/${userId}`;
+            const centerFilter = document.getElementById('main-center-filter');
+            if (centerFilter && centerFilter.value !== "0" && currentUserRole === 'admin') {
+                fetchUrl += `?center_id=${centerFilter.value}`;
+            } else if (currentUserRole === 'admin') {
+                fetchUrl += `?center_id=0`;
+            }
+            fetch(fetchUrl)
                 .then(response => {
                     if (!response.ok) throw new Error("Помилка доступу");
                     return response.json();
@@ -784,7 +882,7 @@ function parseDate(rawDate) {
                     let filteredExpenses = allExpenses;
                     if (monthVal) {
                         filteredExpenses = allExpenses.filter(item => {
-                            const d = parseDate(item.Date);
+                            const d = parseDate((item.Date || item.date));
                             return d && d.year + '-' + d.month === monthVal;
                         });
                     }
@@ -799,39 +897,39 @@ function parseDate(rawDate) {
                     const fragment = document.createDocumentFragment();
 
                     filteredExpenses.forEach(item => {
-                        const amountNum = parseFloat(item.Amount) || 0;
+                        const amountNum = parseFloat((item.Amount || item.amount)) || 0;
                         totalSum += amountNum;
                         
                         let receiptIconHtml = '';
-                        if (item.Receipt_Path && item.Receipt_Path.trim() !== '') {
-                            receiptIconHtml = `<button class="receipt-btn" onclick="openReceipt('${item.Receipt_Path}')" title="Переглянути чек">📄 Чек</button>`;
+                        if ((item.receipt_path || item.Receipt_Path) && (item.receipt_path || item.Receipt_Path).trim() !== '') {
+                            receiptIconHtml = `<button class="receipt-btn" onclick="openReceipt('${(item.receipt_path || item.Receipt_Path)}')" title="Переглянути чек">📄 Чек</button>`;
                         }
                         
-                        const displayDate = formatDateForDisplay(item.Date);
-                        const expId = item.Expense_ID;
+                        const displayDate = formatDateForDisplay((item.Date || item.date));
+                        const expId = (item.expense_id || item.Expense_ID);
                         
                         const card = document.createElement('div');
                         card.className = 'expense-card';
                         card.id = `expense-card-${expId}`;
 
-                        const safeName = (item.Expense_Name || '').replace(/'/g, "\\'");
-                        const safeCat = (item.Category || '').replace(/'/g, "\\'");
+                        const safeName = ((item.Expense_Name || item.expense_name) || '').replace(/'/g, "\\'");
+                        const safeCat = ((item.category_name || item.Category) || '').replace(/'/g, "\\'");
                         
-                        // ДІАГНОСТИЧНИЙ ВИВІД (можна видалити після виправлення)
-                        const debugInfo = `<div style="font-size: 0.6em; color: #aaa; margin-top: 5px; border-top: 1px dashed #eee; padding-top: 3px;">ID: ${item.Category_ID || 'null'} | Name_in_Sheet: ${item.Category_Name || 'null'} | Final: ${item.category_name || 'null'}</div>`;
+                                                // ДІАГНОСТИЧНИЙ ВИВІД (можна видалити після виправлення)
+                        const debugInfo = ``;
 
                         card.innerHTML = `
                             <div class="header">
-                                <span>${item.Expense_Name}</span>
+                                <span>${(item.Expense_Name || item.expense_name)}</span>
                                 <span>${amountNum.toFixed(2)} грн</span>
                             </div>
                             <div class="details">
-                                <span>${displayDate} | ${item.category_name || item.Category || 'Інше'}</span>
+                                <span>${displayDate} | ${item.category_name || (item.category_name || item.Category) || 'Інше'}</span>
                                 ${receiptIconHtml}
                             </div>
                             <!-- ${debugInfo} -->
                             <div class="card-actions">
-                                <button class="btn-sm" onclick="openForm('${expId}', '${item.Date}', ${amountNum}, '${safeName}', '${safeCat}', '${item.Receipt_Path || ''}')">✏️ Редагувати</button>
+                                <button class="btn-sm" onclick="openForm('${expId}', '${(item.Date || item.date)}', ${amountNum}, '${safeName}', '${safeCat}', '${(item.receipt_path || item.Receipt_Path) || ''}')">✏️ Редагувати</button>
                                 <button class="btn-sm btn-danger" onclick="deleteExpense('${expId}')">🗑 Видалити</button>
                             </div>
                         `;
@@ -1024,7 +1122,7 @@ function parseDate(rawDate) {
                 return;
             }
 
-            currentEditIndex = allExpenses.findIndex(item => String(item.Expense_ID) === String(expenseId));
+            currentEditIndex = allExpenses.findIndex(item => String((item.expense_id || item.Expense_ID)) === String(expenseId));
 
             if (currentEditIndex !== -1) {
                 if (navBox) navBox.style.display = 'flex';
@@ -1039,8 +1137,8 @@ function parseDate(rawDate) {
             const newIdx = currentEditIndex + direction;
             if (newIdx >= 0 && newIdx < allExpenses.length) {
                 const item = allExpenses[newIdx];
-                const amountNum = parseFloat(item.Amount) || 0;
-                openForm(item.Expense_ID, item.Date, amountNum, item.Expense_Name, item.Category, item.Receipt_Path || '');
+                const amountNum = parseFloat((item.Amount || item.amount)) || 0;
+                openForm((item.expense_id || item.Expense_ID), (item.Date || item.date), amountNum, (item.Expense_Name || item.expense_name), (item.category_name || item.Category), (item.receipt_path || item.Receipt_Path) || '');
             }
         }
 
@@ -1059,7 +1157,7 @@ function parseDate(rawDate) {
 
                 function loadCategories() {
             if (!userId) return;
-            fetch(`/api/categories/${userId}`)
+            fetch(`/api/categories`)
                 .then(response => response.json())
                 .then(result => {
                     currentCategories = sortCategories(result.data || []);

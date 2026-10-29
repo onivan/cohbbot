@@ -18,7 +18,7 @@ serializer = URLSafeSerializer(SECRET_KEY)
 
 from fastapi import Depends
 def get_current_user(request: Request) -> int:
-    """Витягує user_id з кукі сесії (для браузера) або з query params (якщо з бота)"""
+    """Витягує user_id з кукі сесії (для браузера) або з query params/заголовка (якщо з бота)"""
     # 1. Спроба отримати з кукі
     session_cookie = request.cookies.get("session_token")
     if session_cookie:
@@ -31,6 +31,11 @@ def get_current_user(request: Request) -> int:
     tg_user_id = request.query_params.get("user_id")
     if tg_user_id and tg_user_id.isdigit():
         return int(tg_user_id)
+        
+    # 3. Спроба отримати з кастомного заголовка
+    header_user_id = request.headers.get("x-telegram-user-id")
+    if header_user_id and header_user_id.isdigit():
+        return int(header_user_id)
         
     raise HTTPException(status_code=401, detail='Unauthorized')
 
@@ -104,7 +109,7 @@ class MatrixToggleData(BaseModel):
     is_enabled: bool
 
 class BudgetData(BaseModel):
-    target_user_id: int
+    target_center_id: int
     month: str
     category_id: str
     amount: float
@@ -116,7 +121,13 @@ async def login_page(request: Request):
 
 @app.get("/")
 async def read_root(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html", context={"request": request})
+    # Спробуємо отримати user_id з кукі або параметрів
+    user_id = None
+    try:
+        user_id = get_current_user(request)
+    except:
+        pass
+    return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user_id": user_id})
 
 
 # ==========================================
@@ -125,7 +136,7 @@ async def read_root(request: Request):
 
 @app.get("/api/categories")
 async def fetch_categories(current_user: int = Depends(get_current_user)):
-    categories = await database.get_categories()
+    categories = await database.get_categories(current_user)
     return {"status": "ok", "data": categories}
 
 @app.get("/api/categories/{center_id}")
@@ -225,6 +236,8 @@ async def admin_toggle_matrix(data: MatrixToggleData, current_user: int = Depend
         raise HTTPException(status_code=403, detail="Доступ заборонено")
     await database.set_center_category(data.center_id, data.category_id, data.is_enabled)
     return {"status": "ok"}
+
+@app.get("/api/admin/centers")
 async def admin_get_centers(current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
@@ -249,6 +262,11 @@ async def admin_update_center(center_id: int, data: CenterUpdateData, current_us
 # BUDGETS ENDPOINTS
 # ==========================================
 
+@app.get("/api/budgets/center/{center_id}")
+async def get_center_budgets_ep(center_id: int, month: str, current_user: int = Depends(get_current_user)):
+    budgets = await database.get_center_budgets(center_id, month)
+    return {"status": "ok", "data": budgets}
+
 @app.get("/api/budgets/{user_id}")
 async def get_budgets(user_id: int, month: str, current_user: int = Depends(get_current_user)):
     """Отримує бюджети користувача на вказаний місяць."""
@@ -262,8 +280,8 @@ async def set_budget_admin(admin_id: int, data: BudgetData, current_user: int = 
     if not database.is_admin(admin_id):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
         
-    budget_id = await database.set_user_budget(
-        data.target_user_id, 
+    budget_id = await database.set_center_budget(
+        data.target_center_id, 
         data.category_id, 
         data.month, 
         data.amount
@@ -308,8 +326,17 @@ async def upload_receipt(user_id: int, file: UploadFile = File(...), current_use
 # ==========================================
 
 @app.get("/api/expenses/{user_id}")
-async def get_expenses(user_id: int, current_user: int = Depends(get_current_user)):
-    expenses = await database.get_user_expenses(user_id)
+async def get_expenses(user_id: int, center_id: Optional[int] = None, current_user: int = Depends(get_current_user)):
+    # Якщо адміністратор запросив витрати конкретного ЦН
+    if center_id and database.is_admin(current_user):
+        expenses = await database.get_expenses_by_center(center_id)
+    # Якщо адміністратор запросив ВСІ витрати (center_id=0 або all)
+    elif center_id == 0 and database.is_admin(current_user):
+        expenses = await database.get_all_expenses()
+    else:
+        # Для звичайного юзера (або адміна, який дивиться свій ЦН)
+        expenses = await database.get_user_expenses(user_id)
+        
     first_exp = expenses[0] if expenses else {}
     return {
         "status": "ok", 

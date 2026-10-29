@@ -320,7 +320,8 @@ async def delete_expense(expense_id: str, user_id: int):
                 return False
     return True
 
-async def get_user_expenses(user_id: int):
+async def get_expenses_by_center(center_id: int):
+    """Отримує всі витрати конкретного ЦН (для адміна)"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -328,9 +329,80 @@ async def get_user_expenses(user_id: int):
                 SELECT e.id as expense_id, e.date, e.amount, e.expense_name, e.receipt_path, c.name as category_name
                 FROM expenses e
                 LEFT JOIN categories c ON e.category_id = c.id
-                WHERE e.telegram_id = %s
+                WHERE e.center_id = %s
                 ORDER BY e.created_at DESC
-            """, (user_id,))
+            """, (center_id,))
+            records = await cur.fetchall()
+            
+            res = []
+            for i, r in enumerate(records):
+                res.append({
+                    'row_num': i,
+                    'expense_id': r['expense_id'],
+                    'date': str(r['date']),
+                    'amount': float(r['amount']),
+                    'expense_name': r['expense_name'],
+                    'category_name': r['category_name'] or 'Інше',
+                    'receipt_path': r['receipt_path']
+                })
+            return res
+
+async def get_all_expenses():
+    """Отримує абсолютно всі витрати (для адміна)"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT e.id as expense_id, e.date, e.amount, e.expense_name, e.receipt_path, c.name as category_name,
+                       ce.name as center_name
+                FROM expenses e
+                LEFT JOIN categories c ON e.category_id = c.id
+                LEFT JOIN centers ce ON e.center_id = ce.id
+                ORDER BY e.created_at DESC
+            """)
+            records = await cur.fetchall()
+            
+            res = []
+            for i, r in enumerate(records):
+                res.append({
+                    'row_num': i,
+                    'expense_id': r['expense_id'],
+                    'date': str(r['date']),
+                    'amount': float(r['amount']),
+                    'expense_name': f"[{r.get('center_name', 'ЦН')}] {r['expense_name']}", # Додаємо префікс ЦН для адміна
+                    'category_name': r['category_name'] or 'Інше',
+                    'receipt_path': r['receipt_path']
+                })
+            return res
+
+async def get_user_expenses(user_id: int):
+    pool = await get_pool()
+    
+    # Спочатку дізнаємося center_id користувача та його роль
+    u_info = users_cache.get(str(user_id), {})
+    center_id = u_info.get('center_id')
+    
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            # Для всіх користувачів повертаємо витрати ЇХНЬОГО центру (а не тільки їхні власні)
+            # Якщо користувач не має центру, він побачить тільки свої
+            if center_id:
+                await cur.execute("""
+                    SELECT e.id as expense_id, e.date, e.amount, e.expense_name, e.receipt_path, c.name as category_name
+                    FROM expenses e
+                    LEFT JOIN categories c ON e.category_id = c.id
+                    WHERE e.center_id = %s
+                    ORDER BY e.created_at DESC
+                """, (center_id,))
+            else:
+                await cur.execute("""
+                    SELECT e.id as expense_id, e.date, e.amount, e.expense_name, e.receipt_path, c.name as category_name
+                    FROM expenses e
+                    LEFT JOIN categories c ON e.category_id = c.id
+                    WHERE e.telegram_id = %s
+                    ORDER BY e.created_at DESC
+                """, (user_id,))
+                
             records = await cur.fetchall()
             
             res = []
@@ -349,6 +421,21 @@ async def get_user_expenses(user_id: int):
 # ==========================================
 # 4. БЮДЖЕТИ
 # ==========================================
+
+async def get_center_budgets(center_id: int, month: str) -> dict:
+    pool = await get_pool()
+    budgets_map = {}
+    if not center_id: return budgets_map
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT category_id, amount FROM budgets 
+                WHERE center_id = %s AND month = %s
+            """, (center_id, month))
+            records = await cur.fetchall()
+            for r in records:
+                budgets_map[r['category_id']] = float(r['amount'])
+    return budgets_map
 
 async def get_user_budgets(user_id: int, month: str) -> dict:
     pool = await get_pool()
@@ -371,11 +458,12 @@ async def get_user_budgets(user_id: int, month: str) -> dict:
     return budgets_map
 
 async def set_user_budget(user_id: int, category_id: str, month: str, amount: float):
+    pass # Застаріло
+
+async def set_center_budget(center_id: int, category_id: str, month: str, amount: float):
     pool = await get_pool()
-    u_info = users_cache.get(str(user_id), {})
-    center_id = u_info.get('center_id')
     if not center_id:
-        raise HTTPException(status_code=400, detail="Користувач не прив'язаний до ЦН")
+        raise HTTPException(status_code=400, detail="Не вказано ЦН")
         
     budget_id = f"bgt_{month}_{center_id}_{category_id}"
     
