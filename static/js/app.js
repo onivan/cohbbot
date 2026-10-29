@@ -76,6 +76,20 @@ window.fetch = function() {
         if (mainMonthFilter) {
             mainMonthFilter.value = currentMonth;
         }
+
+        function openDatePicker(inputId) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            try {
+                if (typeof input.showPicker === 'function') {
+                    input.showPicker();
+                } else {
+                    input.focus();
+                }
+            } catch (e) {
+                input.focus();
+            }
+        }
         
         function resetMonthFilter() {
             const currentMonth = new Date().toISOString().slice(0, 7);
@@ -116,6 +130,19 @@ window.fetch = function() {
                     isRoleChecked = true;
                     currentUserRole = res.role;
                     currentUserCenterId = res.center_id;
+
+                    const btnMyBudget = document.getElementById('btn-my-budget');
+                    const btnAddExpense = document.getElementById('btn-add-expense');
+
+                    // Показуємо кнопки дій лише користувачам, які мають призначений ЦН
+                    if (currentUserCenterId) {
+                        if (btnMyBudget) btnMyBudget.style.display = 'inline-block';
+                        if (btnAddExpense) btnAddExpense.style.display = 'inline-block';
+                    } else {
+                        if (btnMyBudget) btnMyBudget.style.display = 'none';
+                        if (btnAddExpense) btnAddExpense.style.display = 'none';
+                    }
+
                     if (currentUserRole === 'admin') {
                         const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
                         if (adminBtn) adminBtn.style.display = 'inline-block';

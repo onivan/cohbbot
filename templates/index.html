@@ -17,15 +17,16 @@
 
         <div class="header-bar" style="display: flex; justify-content: space-between; gap: 5px; flex-wrap: wrap; margin-bottom: 15px;">
         <button id="btn-admin-panel" style="flex: 1; min-width: 80px; background: #9c27b0; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openAdminModal()">🎯 Адмін</button>
-        <button id="btn-my-budget" style="flex: 1; min-width: 80px; background: #4CAF50; padding: 8px 4px; font-size: 0.85em;" onclick="openMyBudgetModal()">📊 Бюджет</button>
-        <button style="flex: 1; min-width: 80px; background: #666; padding: 8px 4px; font-size: 0.85em;" onclick="openSettings()">⚙️ Центр</button>
-        <button style="flex: 1; min-width: 80px; padding: 8px 4px; font-size: 0.85em;" onclick="openForm()">➕ Додати</button>
+        <button id="btn-my-budget" style="flex: 1; min-width: 80px; background: #4CAF50; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openMyBudgetModal()">📊 Бюджет</button>
+        <button id="btn-add-expense" style="flex: 1; min-width: 80px; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openForm()">➕ Додати</button>
     </div>
     
     <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
         <label for="main-month-filter" style="font-weight: bold; font-size: 0.9em; min-width: 60px;">Період:</label>
-        <input type="month" id="main-month-filter" onchange="loadExpenses()" style="flex: 1; max-width: 150px; padding: 6px;">
-        <button class="btn-sm" style="background: var(--tg-theme-button-color, #3390ec);" onclick="document.getElementById('main-month-filter').value=''; loadExpenses();">Скинути</button>
+        <div style="display: inline-flex; align-items: center; gap: 4px;">
+            <input type="month" id="main-month-filter" onchange="loadExpenses()" style="padding: 6px;">
+            <button type="button" class="btn-sm" style="background: var(--tg-theme-secondary-bg-color, #e0e0e0); color: var(--tg-theme-text-color, #000); padding: 6px 10px; border: 1px solid var(--tg-theme-hint-color, #ccc);" onclick="openDatePicker('main-month-filter')" title="Обрати місяць">📅</button>
+        </div>
         
         <div id="admin-center-filter-container" style="display: none; width: 100%; gap: 10px; align-items: center; margin-top: 5px;">
             <label for="main-center-filter" style="font-weight: bold; font-size: 0.9em; min-width: 60px;">Центр:</label>
