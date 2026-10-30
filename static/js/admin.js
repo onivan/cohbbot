@@ -1,16 +1,44 @@
-// Авторизований виклик API з автоматичним перенаправленням на /login
+// Зчитуємо користувача з Telegram WebApp, URL-параметра або meta-тега
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) {
+    try { tg.ready(); tg.expand(); } catch(e) {}
+}
+
+const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+const urlParams = new URLSearchParams(window.location.search);
+const metaUserId = document.querySelector('meta[name="user-id"]')?.content;
+
+let userId = tgUser ? tgUser.id : (urlParams.get('user_id') || (metaUserId && metaUserId !== 'None' ? metaUserId : null));
+
+function goToMainPage() {
+    if (userId) {
+        window.location.href = `/?user_id=${userId}`;
+    } else {
+        window.location.href = '/';
+    }
+}
+
+// Авторизований виклик API
 async function fetchWithAuth(url, options = {}) {
+    if (!options.headers) options.headers = {};
+    
+    if (userId) {
+        if (options.headers instanceof Headers) {
+            options.headers.set('x-telegram-user-id', userId);
+        } else {
+            options.headers['x-telegram-user-id'] = userId;
+        }
+    }
+
     try {
         const res = await fetch(url, options);
-        // Якщо користувач не авторизований (401) або не має прав адміна (403)
         if (res.status === 401 || res.status === 403) {
             window.location.href = '/login';
             return null;
         }
         return res;
     } catch (err) {
-        console.error('Помилка авторизації/мережі:', err);
-        window.location.href = '/login';
+        console.error('Помилка запиту:', err);
         return null;
     }
 }

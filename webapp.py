@@ -121,13 +121,23 @@ async def login_page(request: Request):
 
 @app.get("/")
 async def read_root(request: Request):
-    # Спробуємо отримати user_id з кукі або параметрів
     user_id = None
     try:
         user_id = get_current_user(request)
     except:
         pass
-    return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user_id": user_id})
+    
+    response = templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user_id": user_id})
+    if user_id:
+        token = serializer.dumps(user_id)
+        response.set_cookie(
+            key="session_token",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=30 * 24 * 60 * 60 # 30 днів
+        )
+    return response
 
 
 # ==========================================
@@ -170,10 +180,26 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
 
 @app.get("/admin")
 @app.get("/admin.html")
-async def admin_page(request: Request, current_user: int = Depends(get_current_user)):
-    if not database.is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return templates.TemplateResponse(request=request, name="admin.html", context={"request": request})
+async def admin_page(request: Request):
+    user_id = None
+    try:
+        user_id = get_current_user(request)
+    except:
+        pass
+        
+    if not user_id or not database.is_admin(user_id):
+        return Response(status_code=302, headers={"Location": "/login"})
+        
+    response = templates.TemplateResponse(request=request, name="admin.html", context={"request": request, "user_id": user_id})
+    token = serializer.dumps(user_id)
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60
+    )
+    return response
 
 @app.get("/api/admin/users")
 async def admin_get_users(current_user: int = Depends(get_current_user)):

@@ -1,4 +1,54 @@
-﻿function parseDate(rawDate) {
+﻿// ==========================================
+// TELEGRAM WEBAPP ТА БРАУЗЕРНА АВТОРИЗАЦІЯ
+// ==========================================
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) {
+    try { 
+        tg.ready(); 
+        tg.expand(); 
+    } catch(e) {}
+}
+
+const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+const urlParams = new URLSearchParams(window.location.search);
+const metaUserId = document.querySelector('meta[name="user-id"]')?.content;
+
+let userId = tgUser ? tgUser.id : (urlParams.get('user_id') || (metaUserId && metaUserId !== 'None' && metaUserId !== '' ? metaUserId : null));
+
+// РЕДІРЕКТ: Якщо немає авторизації ні з Telegram, ні з браузерної сесії
+if (!userId) {
+    window.location.href = '/login';
+}
+
+if (tg && tg.colorScheme === 'dark') {
+    document.body.classList.add('dark');
+}
+
+// Перевизначаємо fetch для автоматичного додавання заголовка авторизації
+const originalFetch = window.fetch;
+window.fetch = function() {
+    let [resource, config] = arguments;
+    if (userId) {
+        if (!config) config = {};
+        if (!config.headers) config.headers = {};
+        if (config.headers instanceof Headers) {
+            config.headers.set('x-telegram-user-id', userId);
+        } else {
+            config.headers['x-telegram-user-id'] = userId;
+        }
+    }
+    return originalFetch(resource, config);
+};
+
+function openAdminPage() {
+    if (userId) {
+        window.location.href = `/admin?user_id=${userId}`;
+    } else {
+        window.location.href = '/admin';
+    }
+}
+
+function parseDate(rawDate) {
     if (!rawDate) return null;
     if (!isNaN(rawDate) && !String(rawDate).includes('-') && !String(rawDate).includes('.')) {
         const serial = Number(rawDate);
@@ -29,50 +79,6 @@ function formatDateForInput(rawDate) {
     if (!parsed) return new Date().toISOString().split('T')[0];
     return `${parsed.year}-${parsed.month}-${parsed.day}`;
 }
-
-// ==========================================
-// TELEGRAM WEBAPP ТА БРАУЗЕРНА АВТОРИЗАЦІЯ
-// ==========================================
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
-
-if (tg.colorScheme === 'dark') {
-    document.body.classList.add('dark');
-}
-
-// 1. Спроба отримати користувача з Telegram WebApp
-const tgUser = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
-let userId = tgUser ? tgUser.id : null;
-
-// 2. Якщо відкрито у звичайному браузері — беремо user_id з метатега (сесія кукі)
-if (!userId) {
-    const metaUserId = document.querySelector('meta[name="user-id"]');
-    if (metaUserId && metaUserId.content && metaUserId.content !== 'None' && metaUserId.content !== '') {
-        userId = metaUserId.content;
-    }
-}
-
-// 3. РЕДІРЕКТ: Якщо немає авторизації ні з Telegram, ні з браузерної сесії
-if (!userId) {
-    window.location.href = '/login';
-}
-
-// Перевизначаємо fetch для автоматичного додавання заголовка авторизації
-const originalFetch = window.fetch;
-window.fetch = function() {
-    let [resource, config] = arguments;
-    if (userId) {
-        if (!config) config = {};
-        if (!config.headers) config.headers = {};
-        if (config.headers instanceof Headers) {
-            config.headers.set('x-telegram-user-id', userId);
-        } else {
-            config.headers['x-telegram-user-id'] = userId;
-        }
-    }
-    return originalFetch(resource, config);
-};
 
 // ==========================================
 // ІНІЦІАЛІЗАЦІЯ ФІЛЬТРІВ ДАТИ ТА ДЕБАГУ
@@ -187,7 +193,6 @@ function resetCenterFilter() {
     if (centerFilter) {
         centerFilter.value = "0";
     }
-    // Завантажуємо список/зведення (автоматично відобразить зведення всіх центрів)
     loadExpenses();
 }
 
@@ -277,7 +282,6 @@ function selectCenterForAdmin(centerId) {
     if (centerFilter) {
         centerFilter.value = centerId;
     }
-    // Переходимо до списку витрат обраного Центру
     loadExpenses();
 }
 
@@ -370,7 +374,6 @@ function loadMyBudget() {
         .then(budgetRes => {
             const budgets = budgetRes.data || {};
             
-            // Виводимо дебаг в панель (можна розкоментувати за потреби)
             const debugPanel = document.getElementById('budget-debug-panel');
             if (debugPanel) {
                 debugPanel.textContent = JSON.stringify({
@@ -652,7 +655,6 @@ async function toggleCategory(centerId, categoryId, isEnabled) {
     }
 }
 
-// Інлайн-функції редагування/додавання/видалення категорій (збережені для зворотної сумісності)
 function startAdminInlineEdit(catName) {
     renderAdminCategoriesListBox(catName);
 }
@@ -754,7 +756,6 @@ function loadAdminBudgetsForCenter() {
         const budgets = budgetRes.data || {};
         const targetExpenses = expRes.data || [];
         
-        // Виводимо дебаг в панель адміна (можна розкоментувати за потреби)
         const debugPanel = document.getElementById('admin-debug-panel');
         if (debugPanel) {
             debugPanel.textContent = JSON.stringify({
@@ -1023,7 +1024,6 @@ function loadExpenses(targetExpenseId = null) {
     const centerFilterEl = document.getElementById('main-center-filter');
     const backBtn = document.getElementById('btn-back-to-summary');
 
-    // Керуємо видимістю кнопки "Повернутися"
     if (backBtn) {
         if (currentUserRole === 'admin' && centerFilterEl && centerFilterEl.value !== "0") {
             backBtn.style.display = 'inline-block';
@@ -1032,7 +1032,6 @@ function loadExpenses(targetExpenseId = null) {
         }
     }
     
-    // Якщо це адмін без призначеного центру і вибрано "Всі центри (Зведений)"
     if (currentUserRole === 'admin' && !currentUserCenterId && (!centerFilterEl || centerFilterEl.value === "0")) {
         if (summaryView) summaryView.style.display = 'block';
         const expensesList = document.getElementById('expenses-list');
@@ -1119,7 +1118,6 @@ function loadExpenses(targetExpenseId = null) {
                 const safeName = ((item.Expense_Name || item.expense_name) || '').replace(/'/g, "\\'");
                 const safeCat = ((item.category_name || item.Category) || '').replace(/'/g, "\\'");
 
-                // ДІАГНОСТИЧНИЙ ВИВІД
                 const debugInfo = ``;
 
                 card.innerHTML = `
@@ -1256,7 +1254,6 @@ async function saveExpense() {
     const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
     const totalAmount = hryvnia + (kopeck / 100);
 
-    const urlParams = new URLSearchParams(window.location.search);
     const msgId = urlParams.get('msg_id');
     const selectedCategoryId = document.getElementById('f-category').value;
 
@@ -1392,9 +1389,8 @@ function renderCategorySelectOptions() {
 }
 
 // ==========================================
-// СТАРТ ТА АВТО-ВІДКРИТТЯ ЧЕРНЕТКИ З URL
+// СТАРТ ТА ІНІЦІАЛІЗАЦІЯ
 // ==========================================
-const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('draft') === '1') {
     const d_date = urlParams.get('date') || '';
     const d_amount = urlParams.get('amount') || '';
