@@ -64,7 +64,7 @@ main.py              # Точка входу: піднімає uvicorn + бот 
 config.py            # Читання .env (токени, БД, URL, PORT, SECRET_KEY)
 bot_setup.py         # Глобальні об'єкти bot та dp (Dispatcher)
 database.py          # Уся робота з MySQL + in-memory users_cache
-ai_service.py        # Gemini: parse_receipt_image(), optimize_image_for_ai()
+ai_service.py        # Gemini: parse_receipt_image()
 webapp.py            # FastAPI: усі HTTP-ендпоінти, auth, шаблони, статика
 schema.sql           # DDL усіх таблиць + початкові категорії
 requirements.txt     # Залежності
@@ -209,8 +209,7 @@ receipts/            # Завантажені фото чеків (створю�
 ## 11. Відомі проблеми / технічний борг (перевіряй перед роботою)
 
 1. **`ai_service.py`:** модель `'gemini-3.8-flash'` — неіснуюча (має бути напр. `gemini-2.0-flash`).
-   Також `image_opt = optimize_image_for_ai(image)` обчислюється, але в `contents` передається
-   оригінал `image`, а не `image_opt` (оптимізація не застосовується).
+   `optimize_image_for_ai` видалено (мертвий код; Telegram і так стискає фото).
 2. **`static/js/app.js::saveSettings()`** шле POST на `/api/user/{id}/center`, який **видалено**
    з `webapp.py` (призначення ЦН тепер лише адміном) → мертвий код / 404.
 3. **`handlers/settings.py`** (`/settings`) досі викликає `update_user_center` — застарілий потік

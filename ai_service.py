@@ -1,40 +1,9 @@
 import json
 import logging
-import io
 from google import genai
 from google.genai.types import GenerateContentConfig, AutomaticFunctionCallingConfig
 from config import GEMINI_API_KEY
 
-from PIL import Image
-
-def optimize_image_for_ai(image_input, max_size: int = 1600) -> Image.Image:
-    """Оптимізує та стискає зображення для зменшення токенів Gemini.
-
-    Підтримує як об'єкти PIL Image, так і байтові рядки bytes.
-    """
-    if isinstance(image_input, bytes):
-        img = Image.open(io.BytesIO(image_input))
-    elif isinstance(image_input, Image.Image):
-        img = image_input.copy()
-    else:
-        raise TypeError(
-            f"Очікувався bytes або Image.Image, отримано {type(image_input)}"
-        )
-
-    # Зберігаємо пропорції, зменшуючи більшу сторону до max_size
-    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-
-    # Конвертуємо у RGB (якщо це PNG або RGBA)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    # Стискаємо в JPEG у пам'яті
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=80, optimize=True)
-    buffer.seek(0)
-
-    return Image.open(buffer)
-    
 # Ініціалізація асинхронного клієнта Google Gemini API
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -86,7 +55,6 @@ async def parse_receipt_image(image, valid_categories: list) -> dict:
     """
     
     # 3. Виклик актуальної моделі gemini-3.8-flash
-    image_opt = optimize_image_for_ai(image)
     response = await client.aio.models.generate_content(
         model='gemini-3.8-flash',
         contents=[prompt, image],
