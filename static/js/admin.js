@@ -346,6 +346,44 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
     }
 }
 
+// ==========================================
+// F2. ЗАКРИТТЯ МОДАЛОК ПО ESC ТА КЛІКУ ПО BACKDROP
+// ==========================================
+const ADMIN_MODAL_CLOSERS = [
+    { id: 'center-modal', close: () => closeCenterModal() },
+    { id: 'category-modal', close: () => closeCategoryModal() },
+    { id: 'user-modal', close: () => closeUserModal() }
+];
+
+function isAdminModalVisible(el) {
+    return !!el && getComputedStyle(el).display !== 'none';
+}
+
+function initAdminModalDismiss() {
+    ADMIN_MODAL_CLOSERS.forEach(({ id, close }) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        let pressedOnBackdrop = false;
+        el.addEventListener('mousedown', (e) => { pressedOnBackdrop = (e.target === el); });
+        el.addEventListener('touchstart', (e) => { pressedOnBackdrop = (e.target === el); }, { passive: true });
+        el.addEventListener('click', (e) => {
+            if (e.target === el && pressedOnBackdrop) close();
+            pressedOnBackdrop = false;
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' && e.key !== 'Esc') return;
+        const top = ADMIN_MODAL_CLOSERS.find(m => isAdminModalVisible(document.getElementById(m.id)));
+        if (top) {
+            e.preventDefault();
+            top.close();
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initAdminModalDismiss);
+
 // Старт сторінки
 window.onload = async () => {
     // Відразу перевіряємо авторизацію через завантаження центрів

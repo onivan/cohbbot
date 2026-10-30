@@ -101,7 +101,7 @@
                     <button type="button" class="receipt-btn" style="background-color: #4CAF50;" onclick="viewAttachedReceipt()">📄 Переглянути чек</button>
                     <button type="button" class="btn-sm btn-danger" onclick="removeAttachedReceipt()">❌ Видалити</button>
                 </div>
-                <input type="file" id="f-file" accept="image/*" capture>
+                <input type="file" id="f-file" accept="image/*">
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
                 <button class="btn-danger" onclick="closeForm()">Скасувати</button>
@@ -116,7 +116,7 @@
             <h3>Налаштування</h3>
             <div class="form-group"><label>Назва центру:</label><input type="text" id="s-center"></div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-                <button class="btn-danger" onclick="document.getElementById('settings-modal').style.display='none'">Скасувати</button>
+                <button class="btn-danger" onclick="closeSettingsModal()">Скасувати</button>
                 <button onclick="saveSettings()">Зберегти</button>
             </div>
         </div>
@@ -140,7 +140,7 @@
             
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('budget-debug-panel')">🐛 Діагностика</button>
-                <button onclick="document.getElementById('my-budget-modal').style.display='none'">Закрити</button>
+                <button onclick="closeMyBudgetModal()">Закрити</button>
             </div>
         </div>
     </div>

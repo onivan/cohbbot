@@ -1231,6 +1231,8 @@ function viewAttachedReceipt() {
 }
 
 function closeForm() { document.getElementById('modal').style.display = 'none'; }
+function closeMyBudgetModal() { document.getElementById('my-budget-modal').style.display = 'none'; }
+function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
 
 async function saveExpense() {
     const fileInput = document.getElementById('f-file');
@@ -1387,6 +1389,86 @@ function renderCategorySelectOptions() {
         catSelect.value = currentVal;
     }
 }
+
+// ==========================================
+// F2. ЗАКРИТТЯ МОДАЛОК ПО ESC ТА КЛІКУ ПО BACKDROP
+// ==========================================
+// Порядок у списку = порядок «зверху вниз»: першою закривається та, що відкрита зверху
+const MODAL_CLOSERS = [
+    { id: 'receipt-modal', close: () => closeReceipt() },
+    { id: 'admin-budgets-modal', close: () => closeAdminModal() },
+    { id: 'my-budget-modal', close: () => closeMyBudgetModal() },
+    { id: 'settings-modal', close: () => closeSettingsModal() },
+    { id: 'modal', close: () => closeForm() }
+];
+
+function isModalVisible(el) {
+    return !!el && getComputedStyle(el).display !== 'none';
+}
+
+function initModalDismiss() {
+    MODAL_CLOSERS.forEach(({ id, close }) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        // Клік по backdrop (поза .modal-content) закриває модалку.
+        // mousedown/touchstart перевіряємо окремо, щоб виділення тексту з відпусканням
+        // мишки поза вікном не закривало форму випадково.
+        let pressedOnBackdrop = false;
+        el.addEventListener('mousedown', (e) => { pressedOnBackdrop = (e.target === el); });
+        el.addEventListener('touchstart', (e) => { pressedOnBackdrop = (e.target === el); }, { passive: true });
+        el.addEventListener('click', (e) => {
+            if (e.target === el && pressedOnBackdrop) close();
+            pressedOnBackdrop = false;
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' && e.key !== 'Esc') return;
+        const top = MODAL_CLOSERS.find(m => isModalVisible(document.getElementById(m.id)));
+        if (top) {
+            e.preventDefault();
+            top.close();
+        }
+    });
+}
+
+initModalDismiss();
+
+// ==========================================
+// F3. СВАЙП МІЖ ВИТРАТАМИ У ФОРМІ
+// ==========================================
+// Свайп вліво -> наступна витрата, вправо -> попередня (аналог кнопок navExpense)
+function initFormSwipe() {
+    const content = document.querySelector('#modal .modal-content');
+    if (!content) return;
+
+    let startX = 0, startY = 0, startTime = 0;
+
+    content.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        startTime = Date.now();
+    }, { passive: true });
+
+    content.addEventListener('touchend', (e) => {
+        if (!e.changedTouches.length) return;
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
+        const dt = Date.now() - startTime;
+
+        // Свайп має бути швидким, горизонтальним і достатньо довгим
+        if (dt > 800 || Math.abs(dx) < 60 || Math.abs(dy) > 50) return;
+        // Перемикання доступне лише для існуючої витрати (коли є кнопки prev/next)
+        const navBox = document.getElementById('modal-nav-box');
+        if (!navBox || navBox.style.display === 'none') return;
+
+        navExpense(dx < 0 ? 1 : -1);
+    }, { passive: true });
+}
+
+initFormSwipe();
 
 // ==========================================
 // СТАРТ ТА ІНІЦІАЛІЗАЦІЯ
