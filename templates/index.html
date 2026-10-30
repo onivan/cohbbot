@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Мої витрати</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>
+        eruda.init();
+    </script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -171,15 +175,12 @@
             </div>
 
             <!-- Розділ Категорії -->
-            <div id="admin-tab-categories" style="display: none;">
-                <div id="admin-categories-list-box" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 8px;">
-                    Завантаження категорій...
+                <div id="admin-tab-categories" style="display: none;">
+                    <h3 id="admin-categories-list-header" style="margin-top: 0; margin-bottom: 10px;">Налаштування категорій</h3>
+                    <div id="admin-categories-list-box" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 6px; padding: 8px;">
+                        Завантаження категорій...
+                    </div>
                 </div>
-                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
-                    <input type="text" id="admin-new-cat-input" placeholder="Нова категорія для центру" style="flex: 1; margin: 0;" onkeydown="if(event.key==='Enter') addAdminUserCategory()">
-                    <button type="button" style="background: #4CAF50;" onclick="addAdminUserCategory()">➕ Додати</button>
-                </div>
-            </div>
             
             <div id="admin-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Admin debug panel (waiting for data...)

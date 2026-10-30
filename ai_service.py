@@ -120,3 +120,4 @@ async def parse_receipt_image(image, valid_categories: list) -> dict:
     }
     
     return result
+

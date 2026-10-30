@@ -577,63 +577,88 @@ window.fetch = function() {
             const targetCenterId = document.getElementById('admin-center-select').value;
             const listBox = document.getElementById('admin-categories-list-box');
             if (!targetCenterId) {
-                if (listBox) listBox.innerHTML = 'Оберіть користувача.';
+                if (listBox) listBox.innerHTML = 'Оберіть центр.';
                 return;
             }
 
             if (listBox) listBox.innerHTML = 'Завантаження категорій...';
 
-            fetch(`/api/categories/${targetCenterId}`)
+            // Запитуємо матрицю, яка містить ВСІ існуючі категорії та зв'язки з центрами
+            fetch('/api/admin/matrix')
                 .then(r => r.json())
                 .then(res => {
-                    adminTargetCategories = sortCategories(res.data || []);
-                    renderAdminCategoriesListBox();
+                    if (res.status === 'ok' && res.data) {
+                        renderAdminCategoriesListBox(targetCenterId, res.data);
+                    } else {
+                        if (listBox) listBox.innerHTML = 'Помилка завантаження даних.';
+                    }
                 })
                 .catch(err => {
                     if (listBox) listBox.innerHTML = 'Помилка завантаження категорій: ' + err.message;
                 });
         }
 
-        function renderAdminCategoriesListBox(editingCat = null) {
+        function renderAdminCategoriesListBox(targetCenterId, matrixData) {
             const box = document.getElementById('admin-categories-list-box');
             if (!box) return;
-            box.innerHTML = '';
 
-            if (adminTargetCategories.length === 0) {
+            const categories = sortCategories(matrixData.categories || []);
+            const links = matrixData.links || [];
+
+            if (categories.length === 0) {
                 box.innerHTML = '<div style="text-align:center; color:#888;">Категорій немає.</div>';
                 return;
             }
 
-            adminTargetCategories.forEach((cat) => {
-                const catName = typeof cat === 'object' ? cat.name : cat;
-                const item = document.createElement('div');
-                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);';
+            const headerEl = document.getElementById('admin-categories-list-header');
+            if (headerEl) {
+                headerEl.textContent = 'Налаштування категорій';
+            }
 
-                if (editingCat && editingCat === catName) {
-                    const safeOldName = catName.replace(/'/g, "\\'");
-                    item.innerHTML = `
-                        <input type="text" id="admin-inline-edit-input" value="${catName.replace(/"/g, '&quot;')}" style="flex: 1; margin-right: 8px; padding: 4px 6px; margin-top: 0;" onkeydown="if(event.key==='Enter') saveAdminCategoryRename('${safeOldName}')">
-                        <div style="display: flex; gap: 5px;">
-                            <button type="button" class="btn-sm" style="background-color: #4CAF50; color: white;" onclick="saveAdminCategoryRename('${safeOldName}')">💾</button>
-                            <button type="button" class="btn-sm btn-danger" onclick="renderAdminCategoriesListBox()">❌</button>
-                        </div>
-                    `;
-                } else {
-                    let actionsHtml = '';
-                    if (catName !== 'Інше') {
-                        const safeName = catName.replace(/'/g, "\\'");
-                        actionsHtml = `
-                            <div style="display: flex; gap: 5px;">
-                                <button type="button" class="btn-sm" onclick="startAdminInlineEdit('${safeName}')">✏️</button>
-                                <button type="button" class="btn-sm btn-danger" onclick="removeAdminCenterCategory('${safeName}')">🗑</button>
-                            </div>
-                        `;
-                    }
-                    item.innerHTML = `<span>${catName}</span>${actionsHtml}`;
-                }
+            let html = '';
+            categories.forEach((cat) => {
+                const catId = cat.id;
+                const catName = cat.name;
+                
+                // Перевіряємо, чи прив'язана дана категорія до обраного Центру
+                const isChecked = links.some(l => 
+                    String(l.center_id) === String(targetCenterId) && 
+                    String(l.category_id) === String(catId)
+                );
 
-                box.appendChild(item);
+                html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--tg-theme-hint-color, #eee);">
+                        <span style="font-weight: 500;">${catName}</span>
+                        <input type="checkbox" style="transform: scale(1.3); cursor: pointer;" 
+                            ${isChecked ? 'checked' : ''} 
+                            onchange="toggleCategory(${targetCenterId}, '${catId}', this.checked)">
+                    </div>
+                `;
             });
+
+            box.innerHTML = html;
+        }
+
+        async function toggleCategory(centerId, categoryId, isEnabled) {
+            try {
+                const res = await fetch('/api/admin/matrix/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        center_id: parseInt(centerId),
+                        category_id: categoryId,
+                        is_enabled: isEnabled
+                    })
+                });
+                
+                if (!res || !res.ok) {
+                    alert('Помилка оновлення категорії');
+                    loadAdminCategoriesForCenter();
+                }
+            } catch (err) {
+                alert('Помилка оновлення: ' + err.message);
+                loadAdminCategoriesForCenter();
+            }
         }
 
         function startAdminInlineEdit(catName) {
