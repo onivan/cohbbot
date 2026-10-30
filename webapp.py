@@ -169,6 +169,7 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
 # ==========================================
 
 @app.get("/admin")
+@app.get("/admin.html")
 async def admin_page(request: Request, current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Forbidden")
