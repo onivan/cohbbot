@@ -17,6 +17,7 @@ templates = Jinja2Templates(directory="templates")
 serializer = URLSafeSerializer(SECRET_KEY)
 
 from fastapi import Depends
+
 def get_current_user(request: Request) -> int:
     """Витягує user_id з кукі сесії (для браузера) або з query params/заголовка (якщо з бота)"""
     # 1. Спроба отримати з кукі
