@@ -75,6 +75,10 @@
     <!-- Модальне вікно форми редагування/створення -->
     <div id="modal">
         <div class="modal-content">
+            <div class="modal-actions-top">
+                <button class="btn-danger" onclick="closeForm()">Скасувати</button>
+                <button onclick="saveExpense()">Зберегти</button>
+            </div>
             <div id="modal-nav-box" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <button type="button" id="btn-prev" class="btn-sm" onclick="navExpense(-1)">⬅️ Попередня</button>
                 <span style="font-size: 0.8em; color: var(--tg-theme-hint-color, #888);">Перехід між витратами</span>
@@ -103,28 +107,28 @@
                 </div>
                 <input type="file" id="f-file" accept="image/*">
             </div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-                <button class="btn-danger" onclick="closeForm()">Скасувати</button>
-                <button onclick="saveExpense()">Зберегти</button>
-            </div>
         </div>
     </div>
 
     <!-- Модальне вікно налаштування центру -->
     <div id="settings-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
         <div class="modal-content">
-            <h3>Налаштування</h3>
-            <div class="form-group"><label>Назва центру:</label><input type="text" id="s-center"></div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+            <div class="modal-actions-top">
                 <button class="btn-danger" onclick="closeSettingsModal()">Скасувати</button>
                 <button onclick="saveSettings()">Зберегти</button>
             </div>
+            <h3>Налаштування</h3>
+            <div class="form-group"><label>Назва центру:</label><input type="text" id="s-center"></div>
         </div>
     </div>
 
     <!-- Модальне вікно "Мій бюджет" -->
     <div id="my-budget-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
         <div class="modal-content" style="max-width: 500px; margin: 20px auto;">
+            <div class="modal-actions-top" style="justify-content: space-between;">
+                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('budget-debug-panel')">🐛 Діагностика</button>
+                <button onclick="closeMyBudgetModal()">Закрити</button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <h3 id="my-budget-title" style="margin: 0;">Бюджет ЦН</h3>
                 <input type="month" id="my-budget-month" onchange="loadMyBudget()">
@@ -137,17 +141,16 @@
             <div id="budget-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Debug panel (waiting for data...)
             </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('budget-debug-panel')">🐛 Діагностика</button>
-                <button onclick="closeMyBudgetModal()">Закрити</button>
-            </div>
         </div>
     </div>
 
     <!-- Модальне вікно "Адміністратор" -->
     <div id="admin-budgets-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100;">
         <div class="modal-content" style="max-width: 500px; margin: 20px auto;">
+            <div class="modal-actions-top" style="justify-content: space-between;">
+                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('admin-debug-panel')">🐛 Діагностика</button>
+                <button class="btn-danger" onclick="closeAdminModal()">Закрити</button>
+            </div>
             <h3 id="admin-modal-title" style="margin-top: 0; margin-bottom: 12px;">Панель адміністратора</h3>
             
             <div id="admin-center-select-container" style="margin-bottom: 15px;">
@@ -185,11 +188,6 @@
             
             <div id="admin-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Admin debug panel (waiting for data...)
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <button class="btn-sm" style="background: var(--tg-theme-hint-color, #ccc); color: #333;" onclick="toggleDebug('admin-debug-panel')">🐛 Діагностика</button>
-                <button class="btn-danger" onclick="closeAdminModal()">Закрити</button>
             </div>
         </div>
     </div>

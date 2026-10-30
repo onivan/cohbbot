@@ -23,12 +23,12 @@
         th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
         th { background-color: #f4f4f4; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); padding: 20px; box-sizing: border-box; z-index: 100; }
-        .modal-content { background: white; padding: 20px; border-radius: 8px; max-width: 500px; margin: 0 auto; color: #000; }
+        .modal-content { background: white; padding: 20px; border-radius: 8px; max-width: 500px; margin: 0 auto; color: #000; max-height: calc(100vh - 40px); overflow-y: auto; }
+        .modal-actions-top { position: sticky; top: -20px; margin: -20px -20px 12px -20px; padding: 20px 20px 10px 20px; background: white; display: flex; gap: 10px; justify-content: flex-end; align-items: center; z-index: 5; border-bottom: 1px solid #e0e0e0; }
         
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
         .form-group input, .form-group select { width: 100%; padding: 8px; box-sizing: border-box; }
-        .actions-btn { display: flex; gap: 10px; justify-content: flex-end; }
     </style>
 </head>
 <body>
@@ -118,6 +118,10 @@
     <!-- Center Modal -->
     <div id="center-modal" class="modal">
         <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCenterModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCenter()">Зберегти</button>
+            </div>
             <h3 id="center-modal-title">Додати ЦН</h3>
             <input type="hidden" id="c-id">
             <div class="form-group">
@@ -135,16 +139,16 @@
                     <option value="0">Неактивний</option>
                 </select>
             </div>
-            <div class="actions-btn">
-                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCenterModal()">Скасувати</button>
-                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCenter()">Зберегти</button>
-            </div>
         </div>
     </div>
     
     <!-- Category Modal -->
     <div id="category-modal" class="modal">
         <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCategoryModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCategory()">Зберегти</button>
+            </div>
             <h3 id="category-modal-title">Додати Категорію</h3>
             <div class="form-group">
                 <label>ID (Тільки англ, без пробілів, напр. cat_office):</label>
@@ -165,24 +169,20 @@
                     <option value="0">Неактивна</option>
                 </select>
             </div>
-            <div class="actions-btn">
-                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCategoryModal()">Скасувати</button>
-                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCategory()">Зберегти</button>
-            </div>
         </div>
     </div>
     <div id="user-modal" class="modal">
         <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeUserModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveUserCenter()">Зберегти</button>
+            </div>
             <h3>Призначити ЦН користувачу</h3>
             <p id="u-name-display" style="font-weight: bold;"></p>
             <input type="hidden" id="u-id">
             <div class="form-group">
                 <label>Оберіть Центр Надії:</label>
                 <select id="u-center-select"></select>
-            </div>
-            <div class="actions-btn">
-                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeUserModal()">Скасувати</button>
-                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveUserCenter()">Зберегти</button>
             </div>
         </div>
     </div>
