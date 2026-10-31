@@ -116,11 +116,8 @@ function resetMonthFilter() {
     if (mainMonthFilter) {
         mainMonthFilter.value = currentMonth;
     }
-    if (currentUserRole === 'admin' && !currentUserCenterId && (!document.getElementById('main-center-filter') || document.getElementById('main-center-filter').value === "0")) {
-        loadAdminCentersSummary();
-    } else {
-        loadExpenses();
-    }
+    // loadExpenses() сам вирішує: зведення по центрах чи список витрат
+    loadExpenses();
 }
 
 function toggleDebug(panelId) {
@@ -133,6 +130,38 @@ function toggleDebug(panelId) {
 let currentUserRole = 'user';
 let currentUserCenterId = null;
 let isRoleChecked = false;
+
+// Обраний у фільтрі ЦН (тільки для адміна). null = «Всі центри (Зведений)»
+function getSelectedCenterId() {
+    const sel = document.getElementById('main-center-filter');
+    const val = sel ? String(sel.value) : '0';
+    if (currentUserRole === 'admin' && val && val !== '0') return parseInt(val);
+    return null;
+}
+
+// Адмін на «зведенні»: показуємо картки центрів, а не список витрат
+function isAdminSummaryMode() {
+    return currentUserRole === 'admin' && !getSelectedCenterId();
+}
+
+// Для бюджету завжди потрібен конкретний ЦН: обраний у фільтрі, інакше — власний ЦН адміна
+function getBudgetCenterId() {
+    const selected = getSelectedCenterId();
+    if (selected) return selected;
+    return currentUserCenterId ? parseInt(currentUserCenterId) : null;
+}
+
+// Кнопки дій: додавати витрати можна лише у свій ЦН
+function updateActionButtons() {
+    const btnAdd = document.getElementById('btn-add-expense');
+    const btnBudget = document.getElementById('btn-my-budget');
+    const hasOwnCenter = !!currentUserCenterId;
+    const selected = getSelectedCenterId();
+    const viewingOwnCenter = !selected || String(selected) === String(currentUserCenterId);
+
+    if (btnAdd) btnAdd.style.display = (hasOwnCenter && viewingOwnCenter) ? 'inline-block' : 'none';
+    if (btnBudget) btnBudget.style.display = hasOwnCenter ? 'inline-block' : 'none';
+}
 
 function checkUserRole() {
     if (!userId) return;
@@ -153,31 +182,16 @@ function checkUserRole() {
             currentUserRole = res.role;
             currentUserCenterId = res.center_id;
 
-            const btnMyBudget = document.getElementById('btn-my-budget');
-            const btnAddExpense = document.getElementById('btn-add-expense');
-
-            if (currentUserCenterId) {
-                if (btnMyBudget) btnMyBudget.style.display = 'inline-block';
-                if (btnAddExpense) btnAddExpense.style.display = 'inline-block';
-            } else {
-                if (btnMyBudget) btnMyBudget.style.display = 'none';
-                if (btnAddExpense) btnAddExpense.style.display = 'none';
-            }
-
             if (currentUserRole === 'admin') {
                 const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
                 if (adminBtn) adminBtn.style.display = 'inline-block';
                 loadCentersForAdmin();
                 loadCentersForAdminFilter();
-
-                if (!currentUserCenterId) {
-                    loadAdminCentersSummary();
-                } else {
-                    loadExpenses();
-                }
-            } else {
-                loadExpenses();
             }
+
+            updateActionButtons();
+            // loadExpenses() сам вирішує: зведення по центрах чи список витрат
+            loadExpenses();
         })
         .catch(err => {
             console.error("Error fetching user role:", err);
@@ -236,6 +250,7 @@ function loadAdminCentersSummary() {
 
             let html = '';
             centers.forEach(c => {
+                const isMyCenter = currentUserCenterId && String(c.id) === String(currentUserCenterId);
                 const spent = c.total_spent || 0;
                 const budget = c.total_budget || 0;
                 const hasBudget = c.has_budget;
@@ -250,7 +265,7 @@ function loadAdminCentersSummary() {
                 html += `
                     <div class="expense-card" style="cursor: pointer; margin-bottom: 12px; transition: transform 0.1s;" onclick="selectCenterForAdmin(${c.id})" title="Натисніть, щоб переглянути витрати ЦН">
                         <div class="header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <strong>🏢 ${c.name} (${c.city || 'ЦН'})</strong>
+                            <strong>🏢 ${c.name} (${c.city || 'ЦН'})${isMyCenter ? ' <span style="background: #4CAF50; color: white; font-size: 0.75em; padding: 2px 6px; border-radius: 10px; vertical-align: middle;">⭐ Мій ЦН</span>' : ''}</strong>
                             <button type="button" class="btn-sm" style="background: #9c27b0; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-weight: bold; cursor: pointer;" onclick="event.stopPropagation(); openAdminModal(${c.id});" title="Панель керування бюджетом та категоріями">⚙️ Керувати</button>
                         </div>
                         <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
@@ -295,7 +310,7 @@ function loadCentersForAdminFilter() {
                 res.data.forEach(c => {
                     const opt = document.createElement('option');
                     opt.value = c.id;
-                    opt.textContent = c.name;
+                    opt.textContent = c.name + (currentUserCenterId && String(c.id) === String(currentUserCenterId) ? ' ⭐' : '');
                     select.appendChild(opt);
                 });
                 container.style.display = 'flex';
@@ -363,24 +378,36 @@ function loadMyBudget() {
     const list = document.getElementById('my-budget-list');
     list.innerHTML = 'Завантаження...';
     
-    const centerFilter = document.getElementById('main-center-filter');
-    let budgetUrl = `/api/budgets/${userId}?month=${month}`;
-    if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
-        budgetUrl = `/api/budgets/center/${centerFilter.value}?month=${month}`;
-    }
-    
-    fetch(budgetUrl)
-        .then(r => r.json())
-        .then(budgetRes => {
+    // Бюджет завжди показуємо для конкретного ЦН: обраного у фільтрі,
+    // а якщо обрано «Всі центри» — для власного ЦН адміна
+    const centerId = getBudgetCenterId();
+    const budgetUrl = centerId
+        ? `/api/budgets/center/${centerId}?month=${month}`
+        : `/api/budgets/${userId}?month=${month}`;
+    const expensesUrl = centerId
+        ? `/api/expenses/${userId}?center_id=${centerId}`
+        : `/api/expenses/${userId}`;
+    const categoriesUrl = (centerId && String(centerId) !== String(currentUserCenterId))
+        ? `/api/categories/${centerId}`
+        : `/api/categories`;
+
+    Promise.all([
+        fetch(budgetUrl).then(r => r.json()),
+        fetch(expensesUrl).then(r => r.json()),
+        fetch(categoriesUrl).then(r => r.json()).catch(() => ({ data: currentCategories }))
+    ])
+        .then(([budgetRes, expRes, catRes]) => {
             const budgets = budgetRes.data || {};
+            const budgetExpenses = expRes.data || [];
+            const categories = sortCategories(catRes.data || []);
             
             const debugPanel = document.getElementById('budget-debug-panel');
             if (debugPanel) {
                 debugPanel.textContent = JSON.stringify({
                     "currentMonthSelected": month,
-                    "expensesCount": allExpenses.length,
-                    "firstExpenseRaw": allExpenses[0] || null,
-                    "parsedFirstDate": allExpenses[0] ? parseDate(allExpenses[0].Date || allExpenses[0].date) : null,
+                    "expensesCount": budgetExpenses.length,
+                    "firstExpenseRaw": budgetExpenses[0] || null,
+                    "parsedFirstDate": budgetExpenses[0] ? parseDate(budgetExpenses[0].Date || budgetExpenses[0].date) : null,
                     "budgetsResult": budgets
                 }, null, 2);
             }
@@ -389,7 +416,7 @@ function loadMyBudget() {
             let totalSpent = 0;
             let totalPlanned = 0;
             
-            allExpenses.forEach(exp => {
+            budgetExpenses.forEach(exp => {
                 const rawDate = exp.Date || exp.date;
                 const expDate = parseDate(rawDate);
                 if (expDate && `${expDate.year}-${expDate.month}` === month) {
@@ -400,7 +427,7 @@ function loadMyBudget() {
                     
                     if (!catId || !catId.startsWith('cat_')) {
                         catId = 'cat_other';
-                        const matchedCat = currentCategories.find(c => {
+                        const matchedCat = categories.find(c => {
                             const cName = typeof c === 'object' ? String(c.name).trim() : String(c).trim();
                             return cName.toLowerCase() === String(catName).trim().toLowerCase();
                         });
@@ -415,13 +442,13 @@ function loadMyBudget() {
                 }
             });
 
-            if (currentCategories.length === 0) {
+            if (categories.length === 0) {
                 list.innerHTML = 'Категорії не завантажено.';
                 return;
             }
             
             let html = '';
-            currentCategories.forEach(cat => {
+            categories.forEach(cat => {
                 const catId = typeof cat === 'object' ? cat.id : cat;
                 const catName = typeof cat === 'object' ? cat.name : cat;
                 
@@ -1032,10 +1059,15 @@ function loadExpenses(targetExpenseId = null) {
         }
     }
     
-    if (currentUserRole === 'admin' && !currentUserCenterId && (!centerFilterEl || centerFilterEl.value === "0")) {
+    updateActionButtons();
+
+    if (isAdminSummaryMode()) {
         if (summaryView) summaryView.style.display = 'block';
         const expensesList = document.getElementById('expenses-list');
         if (expensesList) expensesList.style.display = 'none';
+        // Зведення не стосується бюджету конкретного ЦН — ховаємо блок бюджету
+        const budgetBox = document.getElementById('main-budget-summary');
+        if (budgetBox) budgetBox.style.display = 'none';
         loadAdminCentersSummary();
         return;
     } else {
@@ -1277,7 +1309,12 @@ async function saveExpense() {
         body: JSON.stringify(payload)
     }).then(r => {
         if (!r.ok) { alert("Помилка збереження! Можливо, ви намагаєтеся відредагувати чужий запис."); return; }
-        closeForm(); 
+        closeForm();
+        // Якщо адмін був на «зведенні» — перемикаємось на свій ЦН, щоб побачити щойно додану витрату
+        if (isAdminSummaryMode() && currentUserCenterId) {
+            const centerFilter = document.getElementById('main-center-filter');
+            if (centerFilter) centerFilter.value = String(currentUserCenterId);
+        }
         loadExpenses(expenseId);
         if (urlParams.get('draft') === '1') tg.close();
     });
