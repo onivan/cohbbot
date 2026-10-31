@@ -8,6 +8,7 @@ credentials.json
 token.json
 client_secrets.json
 .env
+.vps.env
 *.json
 
 # Виключення: якщо у вас є якийсь публічний json-файл, внесіть його окремо з '!'

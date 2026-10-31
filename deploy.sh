@@ -4,7 +4,16 @@
 # Запускати ЛОКАЛЬНО в клоні гілки (dev або main): ./deploy.sh
 set -euo pipefail
 
-VPS="${COHB_VPS:-onivan@167.99.246.23}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$ROOT/.vps.env" ]; then
+    set -a; . "$ROOT/.vps.env"; set +a
+fi
+if [ -z "${COHB_VPS:-}" ]; then
+    echo "!! не задано COHB_VPS. Створи .vps.env (він у .gitignore):" >&2
+    echo "   cp .vps.env.example .vps.env && chmod 600 .vps.env  # COHB_VPS=user@host" >&2
+    exit 1
+fi
+VPS="$COHB_VPS"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 REMOTE="deploy-$BRANCH"
 
