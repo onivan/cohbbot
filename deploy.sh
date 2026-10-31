@@ -25,7 +25,8 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     exit 1
 fi
 
-if [ -z "$(git rev-list "$REMOTE/$BRANCH..$BRANCH" 2>/dev/null)" ]; then
+git fetch "$REMOTE" "$BRANCH" --quiet
+if [ -z "$(git rev-list "$REMOTE/$BRANCH..$BRANCH")" ]; then
     echo "→ $BRANCH: нічого нового, деплой не потрібен ($(git log -1 --oneline))"
     exit 0
 fi
