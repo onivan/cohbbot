@@ -13,6 +13,7 @@ uvicorn[standard]
 jinja2
 pydantic
 python-multipart
+itsdangerous
 
 # Google Cloud, Sheets & Billing Integration
 gspread
