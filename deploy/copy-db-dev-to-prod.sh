@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Переносить дані зі staging-БД (dev-бот) у прод-БД (prod-бот).
 # Запускати НА VPS:
-#     ./deploy/copy-db-dev-to-prod.sh               # лише довідкові дані
-#     ./deploy/copy-db-dev-to-prod.sh --with-users  # + users/expenses (Telegram ID dev-бота!)
+#     ./deploy/copy-db-dev-to-prod.sh             # усі бізнес-таблиці
+#     ./deploy/copy-db-dev-to-prod.sh --ref-only  # лише довідники (без users/expenses/api_logs)
 #
-# Чому не все за замовчуванням: dev і prod — РІЗНІ Telegram-боти, тому в того самого
-# користувача різні telegram_id. Перенесені `users` будуть «мертвими» для прод-бота,
-# а `expenses` FK-залежні від `users`. Довідкові дані (центри, категорії, прив'язки,
-# бюджети, налаштування AI) від ботів не залежать — їх переносити безпечно.
+# Чому users/expenses переносити коректно: telegram_id — це ID КОРИСТУВАЧА, а не бота.
+# У прод-бота й dev-бота той самий користувач має однаковий telegram_id (різняться лише
+# TELEGRAM_TOKEN у .env, тобто «від імені якого бота» він пише).
+# Не переносимо `auth_codes`: одноразові коди входу з терміном дії.
 #
 # Перевизначення шляхів: SRC_ENV=... DST_ENV=...
 set -euo pipefail
@@ -16,13 +16,13 @@ SRC_ENV="${SRC_ENV:-/home/onivan/cohbbot-dev/.env}"
 DST_ENV="${DST_ENV:-/home/onivan/cohbbot/.env}"
 
 REF_TABLES=(centers categories center_categories budgets ai_settings)
-USER_TABLES=(users expenses)
+DATA_TABLES=(users expenses api_logs)
 
-WITH_USERS=0
+REF_ONLY=0
 for arg in "$@"; do
     case "$arg" in
-        --with-users) WITH_USERS=1 ;;
-        -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --ref-only) REF_ONLY=1 ;;
+        -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "!! невідомий аргумент: $arg" >&2; exit 1 ;;
     esac
 done
@@ -66,17 +66,21 @@ echo "→ джерело: $S_NAME @ $S_HOST:$S_PORT"
 echo "→ ціль:    $D_NAME @ $D_HOST:$D_PORT"
 
 TABLES=("${REF_TABLES[@]}")
-[ "$WITH_USERS" = "1" ] && TABLES+=("${USER_TABLES[@]}")
+[ "$REF_ONLY" = "1" ] || TABLES+=("${DATA_TABLES[@]}")
 
 # 1. Ціль має бути зі схемою (schema.sql застосовано)
-have=$(mysql --defaults-extra-file="$TMPDIR_/dst.cnf" -N -e \
-    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$D_NAME';" 2>/dev/null || echo 0)
-echo "→ таблиць у цілі: $have"
-if [ "${have:-0}" -lt "${#REF_TABLES[@]}" ]; then
-    echo "!! у базі '$D_NAME' немає схеми. Спочатку:" >&2
-    echo "   mysql <root> $D_NAME < schema.sql   # або mysql ... < ./schema.sql" >&2
+missing=""
+for t in "${TABLES[@]}"; do
+    c=$(mysql --defaults-extra-file="$TMPDIR_/dst.cnf" -N -e \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$D_NAME' AND table_name='$t';" 2>/dev/null || echo 0)
+    [ "${c:-0}" = "1" ] || missing="$missing $t"
+done
+if [ -n "$missing" ]; then
+    echo "!! у базі '$D_NAME' немає таблиць:$missing" >&2
+    echo "   спочатку застосуйте схему: mysql <user> $D_NAME < schema.sql" >&2
     exit 1
 fi
+echo "→ таблиці в цілі: OK (${#TABLES[@]})"
 
 # 2. Копіюємо: TRUNCATE + дані в одному з'єднанні, FK-перевірки вимкнено
 {

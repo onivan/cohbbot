@@ -138,7 +138,7 @@
 
 **Правила середовища**
 - З VPS — лише `ssh` / `make shell`; `~/.vscode-server` на VPS видалено.
-- Локальний `.env` не потрібен: усе, що залежить від БД і запущеного сервісу, виконується на VPS (`make test`, `make logs`).
+- `.env` існують **лише на VPS** і не комітяться: `/home/onivan/cohbbot/.env` (прод, свій `TELEGRAM_TOKEN`, `PORT=8000`, своя БД) і `/home/onivan/cohbbot-dev/.env` (staging, свій `TELEGRAM_TOKEN`, `PORT=8001`, `cohbbot_db`). У локальних клонах `.env` немає — це нормально, а не «зник файл»: усе, що залежить від БД і запущеного сервісу, виконується на VPS (`make test`, `make logs`). Шаблон змінних — `.env.example` (у git). Різні боти => різні `TELEGRAM_TOKEN`, але `telegram_id` користувача однаковий у всіх ботах.
 - Прод і staging на VPS оновлюються виключно git-пушем.
 - Адреси/секрети — **тільки** у `.vps.env` (gitignore, `chmod 600`); шаблон `.vps.env.example` у git. У коді й документації — `COHB_VPS` / `<VPS>`, без реального хоста.
 
