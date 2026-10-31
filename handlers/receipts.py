@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 
 from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
-from database import users_cache, get_categories, load_users, log_api_usage
+from database import users_cache, get_categories, load_users, log_api_usage, get_all_users
 from ai_service import parse_receipt_image
 from handlers.states import ReceiptState
 
@@ -132,6 +132,37 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 )
             )
         
+        # A1. Валідація «це чек?»: якщо AI визначив, що це не фіскальний чек
+        if not data.get('is_receipt', True):
+            doc_type = (data.get('document_type') or 'невідомий документ').strip()
+            await msg.edit_text(
+                "❌ Це не схоже на фіскальний чек.\n"
+                f"Розпізнано як: {doc_type}.\n\n"
+                "Будь ласка, надішліть фото саме фіскального чека."
+            )
+            # Сповіщаємо адмінів із фото цього документа
+            user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
+            caption = (
+                "⚠️ **Спроба надіслати невалідний чек**\n\n"
+                f"Користувач: {user_info.get('name', 'Невідомо')}\n"
+                f"ЦН: {user_info.get('center', '—')}\n"
+                f"Telegram ID: `{user_id}`\n"
+                f"Тип документа: {doc_type}"
+            )
+            admins = [u for u in get_all_users()
+                      if str(users_cache.get(str(u['user_id']), {}).get('role', '')).strip().lower() == 'admin']
+            for admin in admins:
+                try:
+                    await bot.send_photo(
+                        admin['user_id'],
+                        photo=photo.file_id,
+                        caption=caption,
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+            return
+
         amount = data['amount']
         expense_name = data['expense_name']
         category = data['category']
