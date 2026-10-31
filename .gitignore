@@ -32,3 +32,6 @@ receipts/
 .vscode/
 .continue/
 
+# Тимчасовий вивід команд агента (Remote-SSH не захоплює stdout терміналу)
+.agent-out*.txt
+
