@@ -16,6 +16,16 @@ app = FastAPI(title="Expense Tracker WebApp")
 templates = Jinja2Templates(directory="templates")
 serializer = URLSafeSerializer(SECRET_KEY)
 
+
+def static_version(filename: str) -> str:
+    """Версія статичного файлу для cache-busting (?v=...).
+    Беремо mtime файлу, щоб після зміни JS браузер/Telegram не показував стару версію."""
+    path = os.path.join("static", "js", filename)
+    try:
+        return str(int(os.path.getmtime(path)))
+    except OSError:
+        return str(int(datetime.now().timestamp()))
+
 from fastapi import Depends
 
 def get_current_user(request: Request) -> int:
@@ -134,7 +144,7 @@ async def read_root(request: Request):
     except:
         pass
     
-    response = templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user_id": user_id})
+    response = templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user_id": user_id, "app_version": static_version("app.js")})
     if user_id:
         token = serializer.dumps(user_id)
         response.set_cookie(
@@ -174,11 +184,15 @@ from bot_setup import bot
 @app.get("/api/user/{user_id}/role")
 async def get_user_role(user_id: int, current_user: int = Depends(get_current_user)):
     u_info = database.users_cache.get(str(user_id), {})
+    # center_id беремо з кешу, а якщо там порожньо — з БД (кеш міг не оновитися)
+    center_id = u_info.get("center_id")
+    if not center_id:
+        center_id = await database.get_user_center_id(user_id)
     return {
         "status": "ok", 
         "role": u_info.get("role", "user"),
         "name": u_info.get("name", "Невідомо"),
-        "center_id": u_info.get("center_id")
+        "center_id": center_id
     }
 
 # ==========================================
@@ -197,7 +211,7 @@ async def admin_page(request: Request):
     if not user_id or not database.is_admin(user_id):
         return Response(status_code=302, headers={"Location": "/login"})
         
-    response = templates.TemplateResponse(request=request, name="admin.html", context={"request": request, "user_id": user_id})
+    response = templates.TemplateResponse(request=request, name="admin.html", context={"request": request, "user_id": user_id, "app_version": static_version("admin.js")})
     token = serializer.dumps(user_id)
     response.set_cookie(
         key="session_token",
@@ -277,14 +291,14 @@ async def admin_toggle_matrix(data: MatrixToggleData, current_user: int = Depend
 async def admin_get_centers_summary(month: Optional[str] = None, current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
-    summary = await database.get_centers_summary(month)
+    summary = await database.get_centers_summary(month, current_user)
     return {"status": "ok", "data": summary}
 
 @app.get("/api/admin/centers")
 async def admin_get_centers(current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
-    centers = await database.get_centers()
+    centers = await database.get_centers(user_id=current_user)
     return {"status": "ok", "data": centers}
 
 @app.post("/api/admin/centers")

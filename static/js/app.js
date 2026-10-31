@@ -131,6 +131,23 @@ let currentUserRole = 'user';
 let currentUserCenterId = null;
 let isRoleChecked = false;
 
+// Чи це «свій» ЦН адміна. Прапорець is_my_center з сервера має пріоритет.
+function isOwnCenter(centerId, serverFlag) {
+    if (serverFlag === true) return true;
+    if (!currentUserCenterId) return false;
+    if (centerId === null || centerId === undefined || centerId === '') return false;
+    return String(centerId) === String(currentUserCenterId);
+}
+
+// Свій ЦН завжди першим у списку (сервер уже сортує — це підстраховка)
+function sortOwnCenterFirst(centers) {
+    return centers.slice().sort((a, b) => {
+        const aOwn = isOwnCenter(a.id, a.is_my_center) ? 0 : 1;
+        const bOwn = isOwnCenter(b.id, b.is_my_center) ? 0 : 1;
+        return aOwn - bOwn;
+    });
+}
+
 // Обраний у фільтрі ЦН (тільки для адміна). null = «Всі центри (Зведений)»
 function getSelectedCenterId() {
     const sel = document.getElementById('main-center-filter');
@@ -180,7 +197,9 @@ function checkUserRole() {
             if (!res) return;
             isRoleChecked = true;
             currentUserRole = res.role;
-            currentUserCenterId = res.center_id;
+            currentUserCenterId = (res.center_id === null || res.center_id === undefined || res.center_id === '')
+                ? null
+                : Number(res.center_id);
 
             if (currentUserRole === 'admin') {
                 const adminBtn = document.getElementById('btn-admin-panel') || document.getElementById('btn-admin-budgets');
@@ -242,7 +261,7 @@ function loadAdminCentersSummary() {
             if (!res) return;
             if (res.status !== 'ok') throw new Error(res.detail || "Сервер повернув помилку");
             
-            const centers = res.data || [];
+            const centers = sortOwnCenterFirst(res.data || []);
             if (centers.length === 0) {
                 summaryList.innerHTML = '<div style="color: #888; text-align: center; padding: 15px;">Немає зареєстрованих або активних центрів.</div>';
                 return;
@@ -250,7 +269,7 @@ function loadAdminCentersSummary() {
 
             let html = '';
             centers.forEach(c => {
-                const isMyCenter = currentUserCenterId && String(c.id) === String(currentUserCenterId);
+                const isMyCenter = isOwnCenter(c.id, c.is_my_center);
                 const spent = c.total_spent || 0;
                 const budget = c.total_budget || 0;
                 const hasBudget = c.has_budget;
@@ -263,7 +282,7 @@ function loadAdminCentersSummary() {
                 const budgetText = hasBudget ? (budget > 0 ? budget.toFixed(0) + ' грн' : '0 грн') : 'не встановлено';
 
                 html += `
-                    <div class="expense-card" style="cursor: pointer; margin-bottom: 12px; transition: transform 0.1s;" onclick="selectCenterForAdmin(${c.id})" title="Натисніть, щоб переглянути витрати ЦН">
+                    <div class="expense-card" style="cursor: pointer; margin-bottom: 12px; transition: transform 0.1s; ${isMyCenter ? 'border: 2px solid #4CAF50;' : ''}" onclick="selectCenterForAdmin(${c.id})" title="Натисніть, щоб переглянути витрати ЦН">
                         <div class="header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                             <strong>🏢 ${c.name} (${c.city || 'ЦН'})${isMyCenter ? ' <span style="background: #4CAF50; color: white; font-size: 0.75em; padding: 2px 6px; border-radius: 10px; vertical-align: middle;">⭐ Мій ЦН</span>' : ''}</strong>
                             <button type="button" class="btn-sm" style="background: #9c27b0; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-weight: bold; cursor: pointer;" onclick="event.stopPropagation(); openAdminModal(${c.id});" title="Панель керування бюджетом та категоріями">⚙️ Керувати</button>
@@ -306,15 +325,27 @@ function loadCentersForAdminFilter() {
         .then(res => {
             const select = document.getElementById('main-center-filter');
             const container = document.getElementById('admin-center-filter-container');
-            if (res.data && select && container) {
-                res.data.forEach(c => {
-                    const opt = document.createElement('option');
-                    opt.value = c.id;
-                    opt.textContent = c.name + (currentUserCenterId && String(c.id) === String(currentUserCenterId) ? ' ⭐' : '');
-                    select.appendChild(opt);
-                });
-                container.style.display = 'flex';
+            if (!res.data || !select || !container) return;
+
+            // Прибираємо раніше додані ЦН (лишаємо тільки «Всі центри»), щоб не дублювати опції
+            Array.from(select.options).forEach(o => { if (o.value !== '0') o.remove(); });
+
+            const prevValue = select.value || '0';
+
+            // Свій ЦН — першим у списку
+            sortOwnCenterFirst(res.data).forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                const own = isOwnCenter(c.id, c.is_my_center);
+                opt.textContent = c.name + (own ? ' ⭐' : '');
+                if (own) opt.style.fontWeight = 'bold';
+                select.appendChild(opt);
+            });
+
+            if (prevValue && Array.from(select.options).some(o => o.value === prevValue)) {
+                select.value = prevValue;
             }
+            container.style.display = 'flex';
         });
 }
 
@@ -348,7 +379,7 @@ function openMyBudgetModal() {
     const centerFilter = document.getElementById('main-center-filter');
     const titleEl = document.getElementById('my-budget-title');
     if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
-        const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text : '';
+        const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text.replace(/ ⭐/g, '') : '';
         if (titleEl) titleEl.textContent = `Бюджет ЦН ${centerName}`;
     } else {
         fetch(`/api/user/${userId}/center`)

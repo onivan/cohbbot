@@ -105,7 +105,45 @@ def get_all_users() -> list:
     users_list.sort(key=lambda x: x['name'].lower())
     return users_list
 
-async def get_centers(only_active: bool = False):
+def get_cached_center_id(user_id: int):
+    """ID ЦН користувача з кешу пам'яті (швидкий шлях)."""
+    if user_id is None:
+        return None
+    cid = users_cache.get(str(user_id), {}).get('center_id')
+    try:
+        return int(cid) if cid else None
+    except (TypeError, ValueError):
+        return None
+
+async def get_user_center_id(user_id: int):
+    """ID ЦН користувача: з кешу, а якщо там порожньо — напряму з БД."""
+    cid = get_cached_center_id(user_id)
+    if cid:
+        return cid
+    if user_id is None:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT center_id FROM users WHERE telegram_id = %s", (user_id,))
+            row = await cur.fetchone()
+            if row and row[0]:
+                return int(row[0])
+    return None
+
+def _mark_own_center(centers: list, my_center_id) -> list:
+    """Додає прапорець is_my_center і ставить свій ЦН першим у списку."""
+    for c in centers:
+        try:
+            c['is_my_center'] = bool(my_center_id) and int(c['id']) == int(my_center_id)
+        except (TypeError, ValueError, KeyError):
+            c['is_my_center'] = False
+    if my_center_id:
+        centers.sort(key=lambda c: (0 if c.get('is_my_center') else 1, str(c.get('name', '')).lower()))
+    return centers
+
+async def get_centers(only_active: bool = False, user_id: int = None):
+    """Список ЦН. Якщо передано user_id — свій ЦН позначено is_my_center і стоїть першим."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -113,10 +151,13 @@ async def get_centers(only_active: bool = False):
             if only_active:
                 query += " WHERE is_active = 1"
             await cur.execute(query)
-            return await cur.fetchall()
+            centers = list(await cur.fetchall())
+    my_center_id = await get_user_center_id(user_id) if user_id else None
+    return _mark_own_center(centers, my_center_id)
 
-async def get_centers_summary(month: str = None):
-    """Отримує зведення по всіх активних центрах: підсумок витрат та бюджету на місяць."""
+async def get_centers_summary(month: str = None, user_id: int = None):
+    """Отримує зведення по всіх активних центрах: підсумок витрат та бюджету на місяць.
+    Якщо передано user_id — свій ЦН позначено is_my_center і стоїть першим."""
     pool = await get_pool()
     if not month:
         month = datetime.now().strftime("%Y-%m")
@@ -159,7 +200,9 @@ async def get_centers_summary(month: str = None):
                     'total_spent': e_val,
                     'has_budget': cid in budgets_map
                 })
-            return result
+
+    my_center_id = await get_user_center_id(user_id) if user_id else None
+    return _mark_own_center(result, my_center_id)
 
 async def get_all_users_details() -> list:
     """Отримує детальний список користувачів для панелі адміна."""
