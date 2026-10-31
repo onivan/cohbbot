@@ -27,8 +27,8 @@ for arg in "$@"; do
     esac
 done
 
-env_get() { # $1=файл $2=ключ
-    grep -E "^[[:space:]]*$2=" "$1" | tail -1 | cut -d= -f2- | tr -d '\r' | sed 's/[[:space:]]*$//'
+env_get() { # $1=файл $2=ключ; відсутній ключ => порожній рядок (без падіння через set -e)
+    { grep -E "^[[:space:]]*$2=" "$1" || true; } | tail -1 | cut -d= -f2- | tr -d '\r' | sed 's/[[:space:]]*$//'
 }
 
 for f in "$SRC_ENV" "$DST_ENV"; do
