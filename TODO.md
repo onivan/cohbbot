@@ -128,14 +128,23 @@
 | `/home/onivan/cohbbot-dev` | `dev` | `expensebot-dev.service` (порт 8001) | розробка + staging |
 | `/home/onivan/cohbbot` | `main` | `expensebot.service` | прод |
 
-**Робоче середовище — VS Code Remote-SSH**, а не sshfs-монтування. Причина: sshfs не має блокувань, і редактор з агентним записом перезаписують файли один одному застарілим буфером (попередження «The content of the file is newer»). Через це вже втрачалися правки в `TODO.md` (зникли F5, F6, H1, A2). З Remote-SSH усі процеси працюють на одній ФС в одному хості — конфлікту немає.
+**Робоче середовище — локальний клон** `~/wdev/nlfc/CoHBot/cohbbot-dev` на машині розробника, гілка `dev`, `origin` = `git@github.com:onivan/cohbbot.git`. На VPS живе лише код сервісів — редактор і агент туди не заходять.
+
+Причини відмови від Remote-SSH: `~/.vscode-server` тримає node-сервер + ptyHost + fileWatcher + extensionHost і на VPS з 1 ядром / 1 ГБ пам'яті підвішує сайти; крім того в Remote-SSH у Continue не працює shell integration (команда вставляється в термінал без Enter і без виводу). sshfs-монтування теж заборонене — два письменники на одну ФС (втрачені F5, F6, H1, A2).
+
+**Правила середовища**
+- З VPS — лише `ssh` / `make shell`; `~/.vscode-server` на VPS видалено.
+- Локальний `.env` не потрібен: усе, що залежить від БД і запущеного сервісу, виконується на VPS (`make test`, `make logs`).
+- Прод і staging на VPS оновлюються виключно git-пушем.
 
 **Цикл зміни**
-1. Правка файлів → `make test` (тести біжать на VPS, БД там же).
+1. Правка файлів локально → `make test` (через `ssh` біжить на VPS, БД там же).
 2. `git add -A && git commit` — дрібними кроками, одразу після перевірки.
-3. `make deploy` (`./deploy.sh`) — push у `/home/onivan/git/cohbbot-dev.git`; хук `post-receive` оновлює робочий каталог і перезапускає сервіс.
-4. Прод: мердж `dev` → `main`, далі `make deploy-prod` (з каталогу `cohbbot`).
+3. `make deploy` (`./deploy.sh`) — push у `deploy-dev` = `/home/onivan/git/cohbbot-dev.git`; хук `post-receive` оновлює `/home/onivan/cohbbot-dev`, перезапускає `expensebot-dev.service`, а `deploy.sh` додатково звіряє HEAD на VPS і стан сервісу та пушить гілку в GitHub.
+4. Прод: `git checkout main && git merge dev && git push origin main`, далі `./deploy.sh` у клоні `main` (push у `deploy-main` → хук оновлює прод і рестартить).
 5. `make logs` / `make status` — діагностика.
+
+**Аварійний ручний деплой (фолбек)** — `ssh 167.99.246.23`, далі `~/cohdeploy.sh dev` або `~/cohdeploy.sh prod`: `git pull origin <branch>` у каталозі сервісу + `sudo systemctl restart`. Використовувати, лише якщо git-хук недоступний; канонічний шлях — `make deploy`.
 
 **Правила**
 - Деплой — **тільки через git** (ніяких rsync/ручних копій). Хук відмовляється працювати, якщо в робочому каталозі є незакомічені зміни.
