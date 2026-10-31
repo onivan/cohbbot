@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# post-receive хук bare-репозиторію: оновлює робочий каталог і перезапускає сервіс.
+# Встановлюється `deploy/install-hooks.sh` (копіюється у <bare>/hooks/post-receive),
+# налаштування лежить поруч: <bare>/deploy.conf  (TARGET, BRANCH, UNIT).
+set -euo pipefail
+
+GITDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONF="$GITDIR/deploy.conf"
+
+if [ ! -f "$CONF" ]; then
+    echo "!! немає $CONF — запусти deploy/install-hooks.sh" >&2
+    exit 1
+fi
+# shellcheck disable=SC1090
+. "$CONF"
+
+while read -r _old new ref; do
+    [ "$ref" = "refs/heads/$BRANCH" ] || continue
+    echo "→ деплой $BRANCH@$(echo "$new" | cut -c1-7) → $TARGET"
+
+    cd "$TARGET"
+
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        echo "!! у $TARGET є незакомічені зміни — деплой скасовано, нічого не змінено:" >&2
+        git status --short --untracked-files=no >&2
+        exit 1
+    fi
+
+    git fetch "deploy-$BRANCH" --quiet
+    git reset --hard "deploy-$BRANCH/$BRANCH" -q
+    echo "   HEAD: $(git log -1 --oneline)"
+
+    if sudo -n /bin/systemctl restart "$UNIT" 2>/dev/null; then
+        sleep 2
+        if systemctl is-active --quiet "$UNIT"; then
+            echo "   $UNIT: active"
+        else
+            echo "   !! $UNIT не піднявся — див. sudo journalctl -u $UNIT -n 50 --no-pager" >&2
+            exit 1
+        fi
+    else
+        echo "   !! немає passwordless sudo для systemctl — перезапусти вручну:" >&2
+        echo "      sudo systemctl restart $UNIT" >&2
+    fi
+done
