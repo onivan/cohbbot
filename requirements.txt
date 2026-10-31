@@ -1,7 +1,10 @@
 # Telegram Bot Framework (v3.x)
 aiogram>=3.0.0,<4.0.0
 
-# AI & Google Gemini SDK
+# AI: OpenRouter (OpenAI-сумісний API для розпізнавання чеків)
+aiohttp
+
+# AI & Google Gemini SDK (застаріле, лишено для сумісності)
 google-genai
 
 # Web App Backend & Templates

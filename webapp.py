@@ -115,6 +115,12 @@ class BudgetData(BaseModel):
     category_id: str
     amount: float
 
+class AIModelData(BaseModel):
+    name: str
+    model_id: str
+    api_key: Optional[str] = ""
+    is_active: int = 0
+
 
 @app.get("/login")
 async def login_page(request: Request):
@@ -324,6 +330,60 @@ async def set_budget_admin(admin_id: int, data: BudgetData, current_user: int = 
         data.amount
     )
     return {"status": "ok", "budget_id": budget_id}
+
+
+# ==========================================
+# AI-МОДЕЛІ (OPENROUTER)
+# ==========================================
+
+@app.get("/api/admin/ai")
+async def admin_get_ai_models(current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    return {"status": "ok", "data": await database.get_ai_models()}
+
+
+@app.post("/api/admin/ai")
+async def admin_add_ai_model(data: AIModelData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    name = (data.name or "").strip()
+    model_id = (data.model_id or "").strip()
+    api_key = (data.api_key or "").strip()
+    if not name or not model_id:
+        raise HTTPException(status_code=400, detail="Назва та ID моделі обов'язкові")
+    new_id = await database.add_ai_model(name, model_id, api_key, is_active=bool(data.is_active))
+    return {"status": "ok", "id": new_id}
+
+
+@app.put("/api/admin/ai/{model_pk}")
+async def admin_update_ai_model(model_pk: int, data: AIModelData, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    name = (data.name or "").strip()
+    model_id = (data.model_id or "").strip()
+    if not name or not model_id:
+        raise HTTPException(status_code=400, detail="Назва та ID моделі обов'язкові")
+    # Порожній ключ = залишити поточний
+    api_key = (data.api_key or "").strip() or None
+    ok = await database.update_ai_model(model_pk, name, model_id, api_key)
+    return {"status": "ok", "success": ok}
+
+
+@app.delete("/api/admin/ai/{model_pk}")
+async def admin_delete_ai_model(model_pk: int, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    ok = await database.delete_ai_model(model_pk)
+    return {"status": "ok", "success": ok}
+
+
+@app.post("/api/admin/ai/{model_pk}/activate")
+async def admin_activate_ai_model(model_pk: int, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+    ok = await database.set_active_ai_model(model_pk)
+    return {"status": "ok", "success": ok}
 
 
 # ==========================================

@@ -54,6 +54,7 @@ function switchTab(tabId) {
     if (tabId === 'centers') loadCenters();
     if (tabId === 'categories') loadCategories();
     if (tabId === 'matrix') loadMatrix();
+    if (tabId === 'ai') loadAiModels();
 }
 
 let allCenters = [];
@@ -347,12 +348,123 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 }
 
 // ==========================================
+// ШІ-МОДЕЛІ (OPENROUTER)
+// ==========================================
+let allAiModels = [];
+
+async function loadAiModels() {
+    const res = await fetchWithAuth('/api/admin/ai');
+    if (!res || !res.ok) return false;
+
+    const data = await res.json();
+    if (data.status !== 'ok') return false;
+
+    allAiModels = data.data || [];
+    const tbody = document.querySelector('#ai-table tbody');
+    if (tbody) {
+        tbody.innerHTML = '';
+        if (!allAiModels.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Ще не додано жодної моделі</td></tr>';
+        }
+        allAiModels.forEach(m => {
+            const tr = document.createElement('tr');
+            const activeLabel = m.is_active ? '<strong style="color:#4CAF50;">Так</strong>' : 'Ні';
+            const keyLabel = m.has_key ? 'є' : '<span style="color:#f44336;">немає</span>';
+            tr.innerHTML = `
+                <td>${m.name}</td>
+                <td>${m.model_id}</td>
+                <td style="text-align:center;">${keyLabel}</td>
+                <td style="text-align:center;">${activeLabel}</td>
+                <td style="text-align:right;">${m.receipts}</td>
+                <td style="text-align:right;">${m.total_tokens}</td>
+                <td style="text-align:right;">${m.tokens_per_receipt}</td>
+                <td>
+                    <button onclick="editAiModel(${m.id})">Редагувати</button>
+                    ${m.is_active ? '' : `<button onclick="activateAiModel(${m.id})" style="background:#4CAF50;color:#fff;">Активувати</button>`}
+                    <button onclick="deleteAiModel(${m.id})" style="background:#f44336;color:#fff;">Видалити</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+    return true;
+}
+
+function openAiModal() {
+    document.getElementById('ai-id').value = '';
+    document.getElementById('ai-name').value = '';
+    document.getElementById('ai-model-id').value = '';
+    document.getElementById('ai-api-key').value = '';
+    document.getElementById('ai-modal-title').innerText = 'Додати модель';
+    document.getElementById('ai-modal').style.display = 'block';
+}
+
+function editAiModel(id) {
+    const m = allAiModels.find(x => x.id === id);
+    if (!m) return;
+    document.getElementById('ai-id').value = m.id;
+    document.getElementById('ai-name').value = m.name;
+    document.getElementById('ai-model-id').value = m.model_id;
+    document.getElementById('ai-api-key').value = '';
+    document.getElementById('ai-modal-title').innerText = 'Редагувати модель';
+    document.getElementById('ai-modal').style.display = 'block';
+}
+
+function closeAiModal() {
+    document.getElementById('ai-modal').style.display = 'none';
+}
+
+async function saveAiModel() {
+    const id = document.getElementById('ai-id').value;
+    const name = document.getElementById('ai-name').value.trim();
+    const modelId = document.getElementById('ai-model-id').value.trim();
+    const apiKey = document.getElementById('ai-api-key').value.trim();
+
+    if (!name || !modelId) return alert('Назва та ID моделі обов\'язкові');
+
+    const url = id ? `/api/admin/ai/${id}` : '/api/admin/ai';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetchWithAuth(url, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, model_id: modelId, api_key: apiKey})
+    });
+
+    if (res && res.ok) {
+        closeAiModal();
+        loadAiModels();
+    } else if (res) {
+        alert('Помилка збереження моделі');
+    }
+}
+
+async function activateAiModel(id) {
+    const res = await fetchWithAuth(`/api/admin/ai/${id}/activate`, {method: 'POST'});
+    if (res && res.ok) {
+        loadAiModels();
+    } else if (res) {
+        alert('Помилка активації');
+    }
+}
+
+async function deleteAiModel(id) {
+    if (!confirm('Видалити цю модель?')) return;
+    const res = await fetchWithAuth(`/api/admin/ai/${id}`, {method: 'DELETE'});
+    if (res && res.ok) {
+        loadAiModels();
+    } else if (res) {
+        alert('Помилка видалення');
+    }
+}
+
+// ==========================================
 // F2. ЗАКРИТТЯ МОДАЛОК ПО ESC ТА КЛІКУ ПО BACKDROP
 // ==========================================
 const ADMIN_MODAL_CLOSERS = [
     { id: 'center-modal', close: () => closeCenterModal() },
     { id: 'category-modal', close: () => closeCategoryModal() },
-    { id: 'user-modal', close: () => closeUserModal() }
+    { id: 'user-modal', close: () => closeUserModal() },
+    { id: 'ai-modal', close: () => closeAiModal() }
 ];
 
 function isAdminModalVisible(el) {

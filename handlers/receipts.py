@@ -14,11 +14,53 @@ from aiogram.fsm.context import FSMContext
 
 from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
-from database import users_cache, get_categories, load_users, log_api_usage, get_all_users
-from ai_service import parse_receipt_image
+from database import (
+    users_cache, get_categories, load_users, log_api_usage,
+    get_all_users, get_active_ai_model,
+)
+from ai_service import parse_receipt_image, AIServiceError
 from handlers.states import ReceiptState
 
 router = Router()
+
+
+def _admin_ids():
+    """Список Telegram ID усіх адміністраторів."""
+    return [
+        u['user_id'] for u in get_all_users()
+        if str(users_cache.get(str(u['user_id']), {}).get('role', '')).strip().lower() == 'admin'
+    ]
+
+
+async def notify_admins_ai_error(err, model_config, user_id, user_name):
+    """
+    Повідомляє адміністраторів про проблему з AI (вичерпані кошти, недійсний ключ,
+    відсутня модель тощо). Для «звичайних» помилок розпізнавання — не турбує.
+    """
+    if not getattr(err, 'is_credit_error', False):
+        return
+
+    model_name = (model_config or {}).get('name') or '—'
+    model_id = (model_config or {}).get('model_id') or '—'
+    err_text = (getattr(err, 'message', None) or str(err))[:500]
+
+    lines = [
+        "🚨 Проблема з розпізнаванням чеків (AI)",
+        "",
+        f"Модель: {model_name}",
+        f"ID моделі: {model_id}",
+        f"Користувач: {user_name} ({user_id})",
+        f"Помилка: {err_text}",
+        "",
+        "💳 Перевірте баланс OpenRouter або змініть активну модель у панелі адміністратора.",
+    ]
+    text = "\n".join(lines)
+
+    for admin_id in _admin_ids():
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception as e:
+            logging.error(f"Не вдалося сповістити адміна {admin_id}: {e}")
 
 async def render_summary(message_obj: types.Message, data: dict, state: FSMContext):
     """
@@ -113,22 +155,50 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 valid_categories.append(str(cat))
         valid_categories = [c for c in valid_categories if c]
 
+        user_info = users_cache.get(user_id_str, {'name': 'User', 'center': 'Центр'})
+        user_name = user_info.get('name', 'Невідомо')
+
+        # Отримуємо активну AI-модель (з БД або фолбек з .env)
+        model_config = await get_active_ai_model()
+        if not model_config:
+            await msg.edit_text(
+                "⚙️ Сервіс розпізнавання чеків не налаштований.\n"
+                "Адміністратора повідомлено — спробуйте, будь ласка, пізніше."
+            )
+            await notify_admins_ai_error(
+                AIServiceError(
+                    "Активна AI-модель не налаштована (немає ні в ai_settings, ні в OPENROUTER_API_KEY).",
+                    is_credit_error=True,
+                ),
+                model_config=None,
+                user_id=user_id,
+                user_name=user_name,
+            )
+            return
+
         # Передаємо зображення в модуль AI
-        data = await parse_receipt_image(image, valid_categories)
-        
+        try:
+            data = await parse_receipt_image(image, valid_categories, model_config)
+        except AIServiceError as ai_err:
+            logging.error(f"AI-помилка: {ai_err.message}")
+            await notify_admins_ai_error(ai_err, model_config, user_id, user_name)
+            await msg.edit_text(
+                "⚠️ Не вдалося розпізнати чек через технічну проблему сервісу.\n"
+                "Адміністратора повідомлено. Спробуйте, будь ласка, пізніше."
+            )
+            return
+
         usage = data.get('_usage', {})
         if usage:
-            user_info = users_cache.get(user_id_str, {'name': 'User', 'center': 'Центр'})
-            user_name = user_info.get('name', 'Невідомо')
-            
-            # Асинхронно записуємо лог. 
-            # Згідно правил, позиційні аргументи в log_api_usage не можна передавати після іменованих (тому все іменовано)
+            # Асинхронно записуємо лог із прив'язкою до конкретної моделі
             asyncio.create_task(
                 log_api_usage(
                     user_id=user_id,
                     user_name=user_name,
                     input_tokens=usage.get('input_tokens', 0),
-                    output_tokens=usage.get('output_tokens', 0)
+                    output_tokens=usage.get('output_tokens', 0),
+                    model_id=usage.get('model_id') or model_config.get('model_id'),
+                    ai_model_id=model_config.get('id'),
                 )
             )
         

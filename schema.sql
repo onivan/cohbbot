@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS `api_logs` (
     `input_tokens` INT NOT NULL DEFAULT 0,
     `output_tokens` INT NOT NULL DEFAULT 0,
     `estimated_cost` DECIMAL(10, 6) NOT NULL DEFAULT 0.000000,
+    `model_id` VARCHAR(191) NULL COMMENT 'ID моделі OpenRouter',
+    `ai_model_id` INT NULL COMMENT 'FK на ai_settings.id',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7.1. Таблиця налаштувань AI-моделей (OpenRouter)
+CREATE TABLE IF NOT EXISTS `ai_settings` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(191) NOT NULL COMMENT 'Назва моделі для адміна',
+    `model_id` VARCHAR(191) NOT NULL COMMENT 'ID моделі OpenRouter',
+    `api_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'API-ключ OpenRouter',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 - активна модель',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -42,6 +42,7 @@
         <button class="tab-btn" onclick="switchTab('centers')">Центри Надії</button>
         <button class="tab-btn" onclick="switchTab('categories')">Категорії</button>
         <button class="tab-btn" onclick="switchTab('matrix')">Матриця ЦН-Категорії</button>
+        <button class="tab-btn" onclick="switchTab('ai')">ШІ-моделі</button>
     </div>
 
     <div id="users" class="tab-content active">
@@ -110,6 +111,30 @@
                 </thead>
                 <tbody id="matrix-body">
                     <!-- Matrix will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="ai" class="tab-content">
+        <p style="margin-bottom: 15px; font-weight: bold;">Активна модель використовується для розпізнавання чеків. API-ключі зберігаються в базі даних.</p>
+        <button style="margin-bottom: 15px; background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openAiModal()">+ Додати модель</button>
+        <div style="overflow-x: auto;">
+            <table id="ai-table">
+                <thead>
+                    <tr>
+                        <th>Назва</th>
+                        <th>ID моделі (OpenRouter)</th>
+                        <th>Ключ</th>
+                        <th>Активна</th>
+                        <th>Чеків</th>
+                        <th>Токенів</th>
+                        <th>Токенів/чек</th>
+                        <th>Дії</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- AI models will be populated here -->
                 </tbody>
             </table>
         </div>
@@ -184,6 +209,31 @@
                 <label>Оберіть Центр Надії:</label>
                 <select id="u-center-select"></select>
             </div>
+        </div>
+    </div>
+
+    <!-- AI Model Modal -->
+    <div id="ai-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" class="btn-danger" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeAiModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveAiModel()">Зберегти</button>
+            </div>
+            <h3 id="ai-modal-title">Додати модель</h3>
+            <input type="hidden" id="ai-id">
+            <div class="form-group">
+                <label>Назва (для адміна):</label>
+                <input type="text" id="ai-name" placeholder="Gemini Flash">
+            </div>
+            <div class="form-group">
+                <label>ID моделі в OpenRouter:</label>
+                <input type="text" id="ai-model-id" placeholder="google/gemini-2.0-flash-001">
+            </div>
+            <div class="form-group">
+                <label>API-ключ OpenRouter:</label>
+                <input type="password" id="ai-api-key" placeholder="sk-or-v1-...">
+            </div>
+            <p style="font-size: 12px; color: #888;">При редагуванні залиште поле ключа порожнім, щоб не змінювати збережений ключ.</p>
         </div>
     </div>
 

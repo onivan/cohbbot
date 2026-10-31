@@ -5,7 +5,10 @@ import time
 from datetime import datetime
 import aiomysql
 from fastapi import HTTPException
-from config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+from config import (
+    DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL,
+)
 
 # Глобальний кеш даних користувачів
 users_cache = {}
@@ -529,18 +532,176 @@ async def debug_budgets(user_id: int, month: str) -> dict:
     return {"status": "MySQL Budgets Debug", "user_id": user_id, "month": month}
 
 # ==========================================
-# 5. API ЛОГИ
+# 5. API ЛОГИ ТА AI-МОДЕЛІ (OPENROUTER)
 # ==========================================
 
-async def log_api_usage(user_id: int, user_name: str, input_tokens: int, output_tokens: int):
+async def ensure_ai_schema():
+    """
+    Ідемпотентно створює таблицю ai_settings та додає службові колонки
+    до api_logs. Викликається один раз під час старту застосунку.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS `ai_settings` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(191) NOT NULL COMMENT 'Назва моделі для адміна',
+                    `model_id` VARCHAR(191) NOT NULL COMMENT 'ID моделі OpenRouter',
+                    `api_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'API-ключ OpenRouter',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 - активна модель',
+                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+            # Колонки для статистики по моделях (можуть вже існувати)
+            for ddl in (
+                "ALTER TABLE `api_logs` ADD COLUMN `model_id` VARCHAR(191) NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `ai_model_id` INT NULL",
+            ):
+                try:
+                    await cur.execute(ddl)
+                except Exception:
+                    pass  # колонка вже існує (помилка 1060)
+
+
+async def log_api_usage(user_id: int, user_name: str, input_tokens: int,
+                        output_tokens: int, model_id: str = None,
+                        ai_model_id: int = None):
     pool = await get_pool()
     estimated_cost = (input_tokens * 0.000075) + (output_tokens * 0.00030)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                INSERT INTO api_logs (user_id, user_name, input_tokens, output_tokens, estimated_cost) 
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, user_name, input_tokens, output_tokens, estimated_cost))
+                INSERT INTO api_logs
+                    (user_id, user_name, input_tokens, output_tokens, estimated_cost, model_id, ai_model_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, user_name, input_tokens, output_tokens, estimated_cost, model_id, ai_model_id))
+
+
+async def get_active_ai_model():
+    """
+    Повертає активну AI-модель у вигляді {'id', 'name', 'model_id', 'api_key'}.
+    Якщо в БД немає активної моделі — фолбек на змінні оточення OPENROUTER_API_KEY.
+    Якщо нічого не налаштовано — повертає None.
+    """
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute("""
+                    SELECT id, name, model_id, api_key FROM ai_settings
+                    WHERE is_active = 1 ORDER BY id ASC LIMIT 1
+                """)
+                row = await cur.fetchone()
+        if row:
+            return {
+                'id': row['id'],
+                'name': row['name'],
+                'model_id': row['model_id'],
+                'api_key': (row['api_key'] or '').strip(),
+            }
+    except Exception as e:
+        logging.error(f"Не вдалося прочитати ai_settings: {e}")
+
+    # Фолбек на .env (для сумісності з існуючими розгортаннями)
+    if OPENROUTER_API_KEY:
+        return {
+            'id': None,
+            'name': 'ENV (за замовчуванням)',
+            'model_id': OPENROUTER_MODEL,
+            'api_key': OPENROUTER_API_KEY.strip(),
+        }
+    return None
+
+
+async def get_ai_models():
+    """Повертає всі AI-моделі разом зі статистикою використання (чеки, токени)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT id, name, model_id, is_active,
+                       CASE WHEN api_key IS NULL OR api_key = '' THEN 0 ELSE 1 END AS has_key
+                FROM ai_settings
+                ORDER BY is_active DESC, name ASC
+            """)
+            models = await cur.fetchall()
+
+            await cur.execute("""
+                SELECT ai_model_id,
+                       COUNT(*) AS receipts,
+                       COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens
+                FROM api_logs
+                WHERE ai_model_id IS NOT NULL
+                GROUP BY ai_model_id
+            """)
+            stats_rows = await cur.fetchall()
+
+    stats = {r['ai_model_id']: r for r in stats_rows}
+    result = []
+    for m in models:
+        st = stats.get(m['id'])
+        receipts = int(st['receipts']) if st else 0
+        total_tokens = int(st['total_tokens']) if st else 0
+        result.append({
+            'id': m['id'],
+            'name': m['name'],
+            'model_id': m['model_id'],
+            'is_active': int(m['is_active']),
+            'has_key': int(m['has_key']),
+            'receipts': receipts,
+            'total_tokens': total_tokens,
+            'tokens_per_receipt': round(total_tokens / receipts, 1) if receipts else 0,
+        })
+    return result
+
+
+async def add_ai_model(name: str, model_id: str, api_key: str, is_active: bool = False) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if is_active:
+                await cur.execute("UPDATE ai_settings SET is_active = 0")
+            await cur.execute("""
+                INSERT INTO ai_settings (name, model_id, api_key, is_active)
+                VALUES (%s, %s, %s, %s)
+            """, (name, model_id, api_key, 1 if is_active else 0))
+            return cur.lastrowid
+
+
+async def update_ai_model(model_pk: int, name: str, model_id: str, api_key: str = None) -> bool:
+    """api_key=None означає «не змінювати існуючий ключ»."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if api_key is None:
+                await cur.execute(
+                    "UPDATE ai_settings SET name=%s, model_id=%s WHERE id=%s",
+                    (name, model_id, model_pk)
+                )
+            else:
+                await cur.execute(
+                    "UPDATE ai_settings SET name=%s, model_id=%s, api_key=%s WHERE id=%s",
+                    (name, model_id, api_key, model_pk)
+                )
+            return cur.rowcount > 0
+
+
+async def delete_ai_model(model_pk: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ai_settings WHERE id=%s", (model_pk,))
+            return cur.rowcount > 0
+
+
+async def set_active_ai_model(model_pk: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE ai_settings SET is_active = 0")
+            await cur.execute("UPDATE ai_settings SET is_active = 1 WHERE id=%s", (model_pk,))
+            return cur.rowcount > 0
 
 # ==========================================
 # 6. АВТЕНТИФІКАЦІЯ

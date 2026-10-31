@@ -31,6 +31,12 @@ async def start_bot():
     await dp.start_polling(bot)
 
 async def main():
+    # 0. Переконуємось, що схема для AI-моделей актуальна (ідемпотентно)
+    try:
+        await database.ensure_ai_schema()
+    except Exception as e:
+        logging.error(f"Не вдалося ініціалізувати схему AI: {e}")
+
     # 1. Завантажуємо користувачів із MySQL
     await database.load_users()
     
