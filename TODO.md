@@ -134,7 +134,7 @@ spent(m)    = SUM(expenses.amount) за місяць
 
 | # | Зміст | Стан |
 |---|---|---|
-| 1 | Схема + `ensure_cash_schema()` + розрахунок: `get_cash_summary`, `get_cash_ledger`, `get_cash_overview`, `recalc_month/chain`, `add_cash_operation` | 🟡 |
+| 1 | Схема + `ensure_cash_schema()` + розрахунок: `get_cash_summary`, `get_cash_ledger`, `get_cash_overview`, `recalc_month/chain`, `add_cash_operation` | ✅ |
 | 2 | «💰 Кошти» для юзера (read-only) + перейменування «📊 Бюджет» → «📊 Ліміти» | ❌ |
 | 3 | Адмін: налаштування обліку, видача / повернення / коригування, масова видача, сповіщення в бот | ❌ |
 | 4 | Огляд по роках і місяцях (20 ЦН), закриття місяця, звірка, CSV | ❌ |
