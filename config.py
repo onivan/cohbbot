@@ -16,6 +16,10 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 WEBAPP_URL = os.getenv("WEBAPP_URL")
 PORT = int(os.getenv("PORT", 8000))
 DEBUG_DIAGNOSTICS = os.getenv("DEBUG_DIAGNOSTICS", "False").lower() == "true"
+
+# Сповіщення в бот про рух коштів ЦН (каса). Вимкнути: CASH_NOTIFY=0
+# (потрібно для smoke-тестів, щоб не слати реальних повідомлень користувачам)
+CASH_NOTIFY = os.getenv("CASH_NOTIFY", "1").lower() not in ("0", "false", "no", "off")
 SECRET_KEY = os.getenv("SECRET_KEY", "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=32))) # Ключ для підпису куків
 
 # MySQL Database Settings

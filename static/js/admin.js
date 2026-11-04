@@ -54,6 +54,7 @@ function switchTab(tabId) {
     if (tabId === 'centers') loadCenters();
     if (tabId === 'categories') loadCategories();
     if (tabId === 'matrix') loadMatrix();
+    if (tabId === 'cash') loadCash();
     if (tabId === 'ai') loadAiModels();
 }
 
@@ -458,13 +459,419 @@ async function deleteAiModel(id) {
 }
 
 // ==========================================
+// J. КОШТИ ЦН (КАСА) — етап 3: налаштування, видача, повернення, журнал
+// ==========================================
+let cashData = null;
+let cashOpState = { centerId: null, kind: 'funding' };
+
+const CASH_KIND_TITLES = {
+    funding: 'Видати кошти',
+    return: 'Повернути кошти',
+    adjustment: 'Коригування залишку'
+};
+
+const CASH_KIND_HINTS = {
+    funding: 'Збільшує залишок ЦН: адміністратор видав гроші центру.',
+    return: 'Зменшує залишок: ЦН повернув невитрачені кошти.',
+    adjustment: 'Може бути зі знаком мінус: −500 зменшить залишок, 500 — збільшить.'
+};
+
+function cashMoney(v) {
+    if (v === null || v === undefined || v === '') return '—';
+    return Number(v).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function cashEsc(text) {
+    return String(text === null || text === undefined ? '' : text)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function cashPad(n) { return String(n).padStart(2, '0'); }
+
+function cashMonth() {
+    const el = document.getElementById('cash-month');
+    if (el && !el.value) {
+        const now = new Date();
+        el.value = `${now.getFullYear()}-${cashPad(now.getMonth() + 1)}`;
+    }
+    return el ? el.value : '';
+}
+
+function cashToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${cashPad(now.getMonth() + 1)}-${cashPad(now.getDate())}`;
+}
+
+function cashRow(centerId) {
+    if (!cashData || !cashData.rows) return null;
+    return cashData.rows.find(r => r.center_id === centerId) || null;
+}
+
+async function cashApiError(res, fallback) {
+    try {
+        const body = await res.json();
+        return body.detail || fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+async function loadCash() {
+    const month = cashMonth();
+    const res = await fetchWithAuth(`/api/admin/cash/overview?month=${encodeURIComponent(month)}`);
+    if (!res || !res.ok) return false;
+    const body = await res.json();
+    if (body.status !== 'ok') return false;
+    cashData = body.data;
+    renderCash();
+    return true;
+}
+
+function renderCash() {
+    const tbody = document.querySelector('#cash-table tbody');
+    if (!tbody || !cashData) return;
+    const d = cashData;
+    tbody.innerHTML = '';
+
+    if (!d.rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#888;">Центрів ще немає</td></tr>';
+    }
+
+    d.rows.forEach(r => {
+        const started = !!(r.configured && r.start_month && r.start_month <= d.month);
+        const closing = r.closing_balance;
+        const negative = closing !== null && closing !== undefined && closing < 0;
+
+        let state = '<span style="color:#f44336;">не налаштовано</span>';
+        if (started) {
+            state = r.status === 'closed'
+                ? '<span style="color:#607D8B;">закритий</span>'
+                : '<span style="color:#2e7d32;">відкритий</span>';
+        }
+        if (r.matches === false) {
+            state += ' <span title="Розрахунок не збігається зі збереженим знімком">⚠️</span>';
+        }
+
+        const actions = started
+            ? `<button type="button" class="btn-mini" onclick="openCashOpModal(${r.center_id}, 'funding')">Видати</button>
+               <button type="button" class="btn-mini" onclick="openCashOpModal(${r.center_id}, 'return')">Повернути</button>
+               <button type="button" class="btn-mini" onclick="openCashOpModal(${r.center_id}, 'adjustment')">±</button>
+               <button type="button" class="btn-mini" onclick="openCashLedgerModal(${r.center_id})">Журнал</button>
+               <button type="button" class="btn-mini" onclick="openCashSettingsModal(${r.center_id})">Налаштувати</button>`
+            : `<button type="button" class="btn-mini" onclick="openCashSettingsModal(${r.center_id})">Налаштувати</button>`;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${cashEsc(r.name)}${r.city ? `<div style="font-size:11px; color:#888;">${cashEsc(r.city)}</div>` : ''}</td>
+            <td>${r.configured ? cashEsc(r.start_month) : '—'}</td>
+            <td style="text-align:right;">${cashMoney(r.month_opening)}</td>
+            <td style="text-align:right; color:#2e7d32;">${cashMoney(r.received)}</td>
+            <td style="text-align:right; color:#c62828;">${cashMoney(r.spent)}</td>
+            <td style="text-align:right; font-weight:bold; ${negative ? 'color:#f44336;' : ''}">${cashMoney(closing)}</td>
+            <td>${state}</td>
+            <td style="white-space:nowrap;">${actions}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    const totals = d.totals || {};
+    const line = document.getElementById('cash-summary-line');
+    if (line) {
+        line.innerHTML = `Надійшло: ${cashMoney(totals.received)} · Витрачено: ${cashMoney(totals.spent)} · Залишок: ${cashMoney(totals.closing_balance)} грн`;
+    }
+
+    const warnings = document.getElementById('cash-warnings');
+    if (warnings) {
+        let html = '';
+        if (d.negative && d.negative.length) {
+            const names = d.negative
+                .map(n => `${cashEsc(n.name)} (${cashMoney(n.closing_balance)} грн)`)
+                .join(', ');
+            html += `<div style="padding:8px 12px; border-left:4px solid #f44336; background:#ffebee; margin-bottom:8px;">⚠️ Мінусовий залишок: ${names}</div>`;
+        }
+        if (d.unconfigured && d.unconfigured.length) {
+            html += `<div style="font-size:12px; color:#888;">Облік коштів не налаштовано: ${d.unconfigured.map(cashEsc).join(', ')}</div>`;
+        }
+        warnings.innerHTML = html;
+    }
+}
+
+// ---------- Налаштування обліку ----------
+function openCashSettingsModal(centerId) {
+    const r = cashRow(centerId);
+    if (!r) return;
+    document.getElementById('cs-center-id').value = centerId;
+    document.getElementById('cash-settings-center').innerText = r.name;
+    document.getElementById('cs-start-month').value = r.start_month || cashMonth();
+    document.getElementById('cs-opening').value =
+        (r.opening_balance !== null && r.opening_balance !== undefined) ? r.opening_balance : 0;
+    document.getElementById('cs-note').value = '';
+    document.getElementById('cash-settings-modal').style.display = 'block';
+}
+
+function closeCashSettingsModal() {
+    document.getElementById('cash-settings-modal').style.display = 'none';
+}
+
+async function saveCashSettings() {
+    const centerId = parseInt(document.getElementById('cs-center-id').value, 10);
+    const startMonth = document.getElementById('cs-start-month').value;
+    const opening = parseFloat(document.getElementById('cs-opening').value) || 0;
+    const note = document.getElementById('cs-note').value.trim();
+
+    if (!startMonth) { alert('Вкажіть місяць початку обліку'); return; }
+    if (!confirm(`Початок обліку: ${startMonth}, залишок ${opening} грн. Залишки наступних місяців буде перераховано. Продовжити?`)) return;
+
+    const res = await fetchWithAuth('/api/admin/cash/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            center_id: centerId,
+            start_month: startMonth,
+            opening_balance: opening,
+            note: note
+        })
+    });
+    if (res && res.ok) {
+        closeCashSettingsModal();
+        loadCash();
+    } else if (res) {
+        alert(await cashApiError(res, 'Помилка збереження налаштувань'));
+    }
+}
+
+// ---------- Рух коштів ----------
+function openCashOpModal(centerId, kind) {
+    const r = cashRow(centerId);
+    if (!r) return;
+    cashOpState = { centerId: centerId, kind: kind };
+
+    document.getElementById('cash-op-title').innerText = CASH_KIND_TITLES[kind] || 'Рух коштів';
+    document.getElementById('cash-op-center').innerText =
+        `${r.name} · залишок ${cashMoney(r.closing_balance)} грн`;
+    document.getElementById('cash-op-hint').innerText = CASH_KIND_HINTS[kind] || '';
+    document.getElementById('op-date').value = cashToday();
+
+    const amountEl = document.getElementById('op-amount');
+    amountEl.value = '';
+    amountEl.min = kind === 'adjustment' ? '' : '0.01';
+
+    document.getElementById('op-method').value = 'cash';
+    document.getElementById('op-counterparty').value = '';
+    document.getElementById('op-comment').value = '';
+    document.getElementById('cash-op-modal').style.display = 'block';
+}
+
+function closeCashOpModal() {
+    document.getElementById('cash-op-modal').style.display = 'none';
+}
+
+async function saveCashOp() {
+    const { centerId, kind } = cashOpState;
+    const opDate = document.getElementById('op-date').value;
+    const amount = parseFloat(document.getElementById('op-amount').value);
+    const method = document.getElementById('op-method').value;
+    const counterparty = document.getElementById('op-counterparty').value.trim();
+    const comment = document.getElementById('op-comment').value.trim();
+
+    if (!opDate) { alert('Вкажіть дату'); return; }
+    if (!amount) { alert('Вкажіть суму'); return; }
+    if (kind !== 'adjustment' && amount <= 0) { alert('Сума має бути більше нуля'); return; }
+
+    const res = await fetchWithAuth('/api/admin/cash/operation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            center_id: centerId,
+            op_date: opDate,
+            kind: kind,
+            amount: amount,
+            method: method,
+            counterparty: counterparty,
+            comment: comment
+        })
+    });
+    if (res && res.ok) {
+        closeCashOpModal();
+        loadCash();
+    } else if (res) {
+        alert(await cashApiError(res, 'Помилка операції'));
+    }
+}
+
+// ---------- Масова видача ----------
+function openCashBatchModal() {
+    if (!cashData) return;
+    const d = cashData;
+    const started = d.rows.filter(r => r.configured && r.start_month && r.start_month <= d.month);
+    if (!started.length) {
+        alert('Немає ЦН з налаштованим обліком коштів на цей місяць');
+        return;
+    }
+
+    const tbody = document.querySelector('#cash-batch-table tbody');
+    tbody.innerHTML = '';
+    started.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${cashEsc(r.name)}</td>
+            <td style="text-align:right;">${cashMoney(r.closing_balance)}</td>
+            <td><input type="number" step="0.01" min="0" data-center-id="${r.center_id}" style="width:100%; padding:6px;" oninput="cashBatchTotal()"></td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('cb-date').value = cashToday();
+    document.getElementById('cb-method').value = 'cash';
+    document.getElementById('cb-counterparty').value = '';
+    document.getElementById('cb-comment').value = `Видача на ${d.month}`;
+    cashBatchTotal();
+    document.getElementById('cash-batch-modal').style.display = 'block';
+}
+
+function closeCashBatchModal() {
+    document.getElementById('cash-batch-modal').style.display = 'none';
+}
+
+function cashBatchTotal() {
+    let total = 0;
+    document.querySelectorAll('#cash-batch-table input[data-center-id]').forEach(inp => {
+        total += parseFloat(inp.value) || 0;
+    });
+    document.getElementById('cash-batch-total').innerText = `Разом: ${cashMoney(total)} грн`;
+    return total;
+}
+
+async function saveCashBatch() {
+    const items = [];
+    document.querySelectorAll('#cash-batch-table input[data-center-id]').forEach(inp => {
+        const amount = parseFloat(inp.value) || 0;
+        if (amount > 0) {
+            items.push({ center_id: parseInt(inp.dataset.centerId, 10), amount: amount });
+        }
+    });
+    if (!items.length) { alert('Вкажіть хоча б одну суму'); return; }
+
+    const opDate = document.getElementById('cb-date').value;
+    if (!opDate) { alert('Вкажіть дату'); return; }
+
+    const res = await fetchWithAuth('/api/admin/cash/funding-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            op_date: opDate,
+            method: document.getElementById('cb-method').value,
+            counterparty: document.getElementById('cb-counterparty').value.trim(),
+            comment: document.getElementById('cb-comment').value.trim(),
+            amounts: items
+        })
+    });
+    if (!res) return;
+    if (!res.ok) {
+        alert(await cashApiError(res, 'Помилка масової видачі'));
+        return;
+    }
+
+    const body = await res.json();
+    const errors = (body.data && body.data.errors) || [];
+    if (errors.length) {
+        alert('Частина ЦН не отримала кошти:\n' +
+            errors.map(e => `ЦН #${e.center_id}: ${e.error}`).join('\n'));
+    }
+    closeCashBatchModal();
+    loadCash();
+}
+
+// ---------- Журнал ----------
+async function openCashLedgerModal(centerId) {
+    const month = cashMonth();
+    const r = cashRow(centerId);
+    const title = document.getElementById('cash-ledger-title');
+    const summaryBox = document.getElementById('cash-ledger-summary');
+    const tbody = document.querySelector('#cash-ledger-table tbody');
+
+    title.innerText = `Журнал коштів: ${r ? r.name : 'ЦН'} · ${month}`;
+    summaryBox.innerHTML = '';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">Завантаження…</td></tr>';
+    document.getElementById('cash-ledger-modal').style.display = 'block';
+
+    const res = await fetchWithAuth(`/api/admin/cash/ledger?center_id=${centerId}&month=${encodeURIComponent(month)}`);
+    if (!res || !res.ok) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#f44336;">Не вдалося завантажити журнал</td></tr>';
+        return;
+    }
+    const body = await res.json();
+    if (body.status !== 'ok') {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#f44336;">Не вдалося завантажити журнал</td></tr>';
+        return;
+    }
+
+    const d = body.data;
+    if (!d.configured) {
+        summaryBox.innerHTML = '<span style="color:#f44336;">Облік коштів для цього ЦН не налаштовано.</span>';
+        tbody.innerHTML = '';
+        return;
+    }
+
+    const s = d.summary || {};
+    summaryBox.innerHTML = `
+        <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:13px;">
+            <span>На початок: <b>${cashMoney(s.opening_balance)}</b></span>
+            <span style="color:#2e7d32;">Надійшло: <b>${cashMoney(s.received)}</b></span>
+            <span style="color:#c62828;">Витрачено: <b>${cashMoney(s.spent)}</b></span>
+            <span>Залишок: <b>${cashMoney(s.closing_balance)}</b> грн</span>
+        </div>
+        <div style="font-size:12px; color:#888; margin-top:4px;">
+            Облік з ${cashEsc(s.start_month || '—')} · стан: ${s.status === 'closed' ? 'закритий' : 'відкритий'}
+            ${s.matches === false ? ' · ⚠️ не збігається зі знімком' : ''}
+        </div>`;
+
+    tbody.innerHTML = '';
+    const rows = d.rows || [];
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">Руху коштів за місяць немає</td></tr>';
+    }
+    rows.forEach(row => {
+        const amount = Number(row.amount) || 0;
+        const color = amount < 0 ? '#c62828' : '#2e7d32';
+        const extra = [];
+        if (row.category_name) extra.push(cashEsc(row.category_name));
+        if (row.comment) extra.push(cashEsc(row.comment));
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="white-space:nowrap;">${cashEsc(row.date)}</td>
+            <td>${cashEsc(row.title)}</td>
+            <td style="text-align:right; color:${color};">${cashMoney(amount)}</td>
+            <td style="text-align:right;">${cashMoney(row.balance)}</td>
+            <td style="font-size:12px; color:#666;">${extra.join(' · ')}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    if (d.truncated) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="5" style="text-align:center; color:#888;">Показано останні 300 операцій</td>';
+        tbody.appendChild(tr);
+    }
+}
+
+function closeCashLedgerModal() {
+    document.getElementById('cash-ledger-modal').style.display = 'none';
+}
+
+// ==========================================
 // F2. ЗАКРИТТЯ МОДАЛОК ПО ESC ТА КЛІКУ ПО BACKDROP
 // ==========================================
 const ADMIN_MODAL_CLOSERS = [
     { id: 'center-modal', close: () => closeCenterModal() },
     { id: 'category-modal', close: () => closeCategoryModal() },
     { id: 'user-modal', close: () => closeUserModal() },
-    { id: 'ai-modal', close: () => closeAiModal() }
+        { id: 'ai-modal', close: () => closeAiModal() },
+    { id: 'cash-settings-modal', close: () => closeCashSettingsModal() },
+    { id: 'cash-op-modal', close: () => closeCashOpModal() },
+    { id: 'cash-batch-modal', close: () => closeCashBatchModal() },
+    { id: 'cash-ledger-modal', close: () => closeCashLedgerModal() }
 ];
 
 function isAdminModalVisible(el) {

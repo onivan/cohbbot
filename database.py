@@ -389,6 +389,7 @@ async def add_expense(row_data: list) -> str:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (expense_id, date, user_id, center_id, amount, expense_name, cat_id, file_path))
             
+    await _touch_cash_safe(center_id, date, reason=f"витрату додано ({expense_id})")
     return expense_id
 
 async def update_expense(expense_id: str, user_id: int, row_data: list):
@@ -397,7 +398,14 @@ async def update_expense(expense_id: str, user_id: int, row_data: list):
     
     pool = await get_pool()
     async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                "SELECT center_id, date FROM expenses WHERE id=%s AND telegram_id=%s",
+                (expense_id, user_id)
+            )
+            old = await cur.fetchone()
+            if not old:
+                return False
             await cur.execute("""
                 UPDATE expenses 
                 SET date=%s, amount=%s, expense_name=%s, category_id=%s, receipt_path=%s
@@ -405,15 +413,32 @@ async def update_expense(expense_id: str, user_id: int, row_data: list):
             """, (date, amount, expense_name, cat_id, file_path, expense_id, user_id))
             if cur.rowcount == 0:
                 return False
+            center_id = old['center_id']
+            old_date = str(old['date'])
+
+    # Перераховуємо від найранішого з двох місяців (дата могла змінитись)
+    first_day = min(str(old_date)[:10], str(date)[:10])
+    await _touch_cash_safe(center_id, first_day, reason=f"витрату змінено ({expense_id})")
     return True
 
 async def delete_expense(expense_id: str, user_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                "SELECT center_id, date FROM expenses WHERE id=%s AND telegram_id=%s",
+                (expense_id, user_id)
+            )
+            old = await cur.fetchone()
+            if not old:
+                return False
             await cur.execute("DELETE FROM expenses WHERE id=%s AND telegram_id=%s", (expense_id, user_id))
             if cur.rowcount == 0:
                 return False
+            center_id = old['center_id']
+            old_date = str(old['date'])
+
+    await _touch_cash_safe(center_id, old_date, reason=f"витрату видалено ({expense_id})")
     return True
 
 async def get_expenses_by_center(center_id: int):
@@ -1084,6 +1109,36 @@ async def _cash_compute(cur, center_id: int, month: str):
 
 # ---------- Підсумок за місяць ----------
 
+async def _cash_snapshot_cur(cur, center_id: int, month: str):
+    """Зафіксований знімок місяця (або None), у межах відкритого курсора."""
+    await cur.execute(
+        """SELECT opening_balance, received, spent, closing_balance, status,
+                  computed_at, closed_at
+           FROM center_month_balances
+           WHERE center_id = %s AND month = %s""",
+        (center_id, month)
+    )
+    snap = await cur.fetchone()
+    if not snap:
+        return None
+    return {
+        'opening_balance': _r2(snap['opening_balance']),
+        'received': _r2(snap['received']),
+        'spent': _r2(snap['spent']),
+        'closing_balance': _r2(snap['closing_balance']),
+        'status': str(snap['status']),
+        'computed_at': str(snap['computed_at']) if snap.get('computed_at') else None,
+        'closed_at': str(snap['closed_at']) if snap.get('closed_at') else None,
+    }
+
+
+async def _cash_snapshot(center_id: int, month: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            return await _cash_snapshot_cur(cur, center_id, month)
+
+
 async def get_cash_summary(center_id: int, month: str = None):
     """Залишки ЦН за місяць: розрахунок + порівняння із зафіксованим знімком."""
     month = month or current_month()
@@ -1093,32 +1148,15 @@ async def get_cash_summary(center_id: int, month: str = None):
             data = await _cash_compute(cur, center_id, month)
             if not data:
                 return {'configured': False, 'center_id': center_id, 'month': month}
-            await cur.execute(
-                """SELECT opening_balance, received, spent, closing_balance, status,
-                          computed_at, closed_at
-                   FROM center_month_balances
-                   WHERE center_id = %s AND month = %s""",
-                (center_id, month)
-            )
-            snap = await cur.fetchone()
+            snapshot = await _cash_snapshot_cur(cur, center_id, month)
 
-    if snap:
-        snapshot = {
-            'opening_balance': _r2(snap['opening_balance']),
-            'received': _r2(snap['received']),
-            'spent': _r2(snap['spent']),
-            'closing_balance': _r2(snap['closing_balance']),
-            'status': str(snap['status']),
-            'computed_at': str(snap['computed_at']) if snap.get('computed_at') else None,
-            'closed_at': str(snap['closed_at']) if snap.get('closed_at') else None,
-        }
+    if snapshot:
         data['status'] = snapshot['status']
         data['matches'] = (
             abs(snapshot['closing_balance'] - data['closing_balance']) < 0.01
             and abs(snapshot['spent'] - data['spent']) < 0.01
         )
     else:
-        snapshot = None
         data['status'] = 'open'
         data['matches'] = None
     data['snapshot'] = snapshot
@@ -1405,15 +1443,82 @@ async def get_cash_overview(year: int = None):
     }
 
 
+# ---------- Таблиця стану коштів за місяць (адмінка) ----------
+
+async def get_cash_admin_table(month: str = None):
+    """Стан коштів по всіх ЦН за один місяць — рядок таблиці адмінки «Кошти».
+
+    Використовує агрегатний `get_cash_overview()` (один набір запитів на рік).
+    """
+    month = month or current_month()
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+    year = int(month[:4])
+
+    overview = await get_cash_overview(year)
+    month_data = next((m for m in overview['months'] if m['month'] == month), None)
+    by_center = {r['center_id']: r for r in (month_data or {}).get('rows', [])}
+
+    rows = []
+    for c in overview['centers']:
+        row = {
+            'center_id': c['id'],
+            'name': c['name'],
+            'city': c['city'],
+            'is_active': c['is_active'],
+            'configured': c['configured'],
+            'start_month': c['start_month'],
+            'opening_balance': c['opening_balance'],  # стартовий залишок обліку (налаштування)
+            'month_opening': None,
+            'funding': None,
+            'returned': None,
+            'adjustment': None,
+            'received': None,
+            'spent': None,
+            'closing_balance': None,
+            'status': 'unconfigured' if not c['configured'] else 'not_started',
+            'matches': None,
+        }
+        state = by_center.get(c['id'])
+        if state:
+            row['month_opening'] = state['opening_balance']
+            for key in ('funding', 'returned', 'adjustment', 'received',
+                        'spent', 'closing_balance', 'status', 'matches'):
+                row[key] = state[key]
+        rows.append(row)
+
+    started = [
+        r for r in rows
+        if r['configured'] and r['start_month']
+        and _month_to_int(r['start_month']) <= _month_to_int(month)
+    ]
+    negative = [
+        {'center_id': r['center_id'], 'name': r['name'],
+         'closing_balance': r['closing_balance']}
+        for r in started if (r['closing_balance'] or 0) < 0
+    ]
+    return {
+        'month': month,
+        'year': year,
+        'rows': rows,
+        'totals': {k: _r2(v) for k, v in ((month_data or {}).get('totals') or {}).items()},
+        'active_count': len(started),
+        'negative': negative,
+        'unconfigured': [r['name'] for r in rows if not r['configured']],
+    }
+
+
 # ---------- Перерахунок знімків ----------
 
-async def recalc_month(center_id: int, month: str, force: bool = False,
+async def recalc_month(center_id: int, month: str, write: bool = True,
                        reopen: bool = False, actor_id: int = None):
-    """Перераховує та зберігає знімок місяця.
+    """Перераховує знімок місяця (за потреби — зберігає його).
 
-    force=False  — закритий місяць не перезаписується;
-    force=True   — перезаписує (після зміни налаштувань або при закритті місяця);
-    reopen=True  — закритий місяць спершу відкривається (+ запис у аудит).
+    write=False  — тільки розрахунок, знімок не змінюється (для звірки);
+    reopen=False — закритий місяць НЕ перезаписується: розбіжність із знімком
+                   покажеться у звірці, рішення ухвалює адмін;
+    reopen=True  — закритий місяць відкривається (+ запис у cash_audit) і
+                   перераховується (операції адміністратора).
     """
     if not is_valid_month(month):
         return None
@@ -1427,22 +1532,21 @@ async def recalc_month(center_id: int, month: str, force: bool = False,
             )
             existing = await cur.fetchone()
             if existing and str(existing['status']) == 'closed':
-                if not force:
+                if not (reopen and write):
                     return await _cash_compute(cur, center_id, month)
-                if reopen:
-                    await cur.execute(
-                        """UPDATE center_month_balances
-                           SET status = 'open', closed_at = NULL, closed_by = NULL
-                           WHERE center_id = %s AND month = %s""",
-                        (center_id, month)
-                    )
-                    await _cash_audit(
-                        cur, 'reopen_month', center_id, month,
-                        'відкрито для перерахунку після зміни даних', actor_id
-                    )
+                await cur.execute(
+                    """UPDATE center_month_balances
+                       SET status = 'open', closed_at = NULL, closed_by = NULL
+                       WHERE center_id = %s AND month = %s""",
+                    (center_id, month)
+                )
+                await _cash_audit(
+                    cur, 'reopen_month', center_id, month,
+                    'відкрито для перерахунку після зміни даних', actor_id
+                )
             data = await _cash_compute(cur, center_id, month)
-            if not data:
-                return None
+            if not data or not write:
+                return data
 
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1462,12 +1566,16 @@ async def recalc_month(center_id: int, month: str, force: bool = False,
     return data
 
 
-async def recalc_chain(center_id: int, from_month: str, actor_id: int = None):
+async def recalc_chain(center_id: int, from_month: str, actor_id: int = None,
+                       reopen: bool = True):
     """Перераховує знімки від from_month до поточного місяця включно.
 
     Залишок кожного місяця залежить від попереднього, тому зміна в минулому
-    зобов'язує перерахувати весь ланцюжок далі (закриті місяці відкриваються
-    з записом у cash_audit). Якщо from_month у майбутньому — рахуємо до нього.
+    зобов'язує перерахувати весь ланцюжок далі. Якщо reopen=True, закриті місяці
+    відкриваються з записом у cash_audit (операції адміністратора);
+    reopen=False — закриті місяці лишаються зафіксованими (витрати ЦН:
+    розбіжність зі знімком покажеться у звірці, адмін вирішує сам).
+    Якщо from_month у майбутньому — рахуємо до нього.
     """
     settings_row = await get_cash_settings(center_id)
     if not settings_row:
@@ -1499,18 +1607,19 @@ async def recalc_chain(center_id: int, from_month: str, actor_id: int = None):
     touched = []
     for value in range(start, end + 1):
         data = await recalc_month(center_id, _int_to_month(value),
-                                  force=True, reopen=True, actor_id=actor_id)
+                                  write=True, reopen=reopen, actor_id=actor_id)
         if data:
             touched.append(_int_to_month(value))
     return touched
 
 
-async def touch_cash_month(center_id: int, day, actor_id: int = None, reason: str = None):
+async def touch_cash_month(center_id: int, day, actor_id: int = None, reason: str = None,
+                           reopen: bool = True):
     """Хук для витрат/операцій у минулому місяці: перерахувати ланцюжок залишків."""
     month = str(day)[:7]
-    if not is_valid_month(month):
+    if not center_id or not is_valid_month(month):
         return []
-    touched = await recalc_chain(center_id, month, actor_id=actor_id)
+    touched = await recalc_chain(center_id, month, actor_id=actor_id, reopen=reopen)
     if touched:
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -1520,6 +1629,16 @@ async def touch_cash_month(center_id: int, day, actor_id: int = None, reason: st
                     reason or f"перераховано {touched[0]}..{touched[-1]}", actor_id
                 )
     return touched
+
+
+async def _touch_cash_safe(center_id, day, reason: str = None):
+    """Тихо перераховує залишки після зміни витрат; не ламає основну операцію."""
+    if not center_id:
+        return
+    try:
+        await touch_cash_month(center_id, day, reason=reason, reopen=False)
+    except Exception as e:
+        logging.error(f"Перерахунок коштів ЦН {center_id} за {day}: {e}")
 
 
 # ---------- Закриття місяця та звірка ----------
@@ -1535,7 +1654,7 @@ async def close_month(month: str, actor_id: int = None):
         if _month_to_int(month) < _month_to_int(st['start_month']):
             skipped.append(center_id)
             continue
-        data = await recalc_month(center_id, month, force=True)
+        data = await recalc_month(center_id, month, write=True)
         if not data:
             skipped.append(center_id)
             continue
@@ -1581,7 +1700,11 @@ async def reopen_month(month: str, actor_id: int = None, reason: str = None):
 
 
 async def reconcile_month(month: str = None):
-    """Подвійна перевірка: неперервність ланцюжка залишків і збіг зі знімками."""
+    """Подвійна перевірка: неперервність ланцюжка залишків і збіг зі знімками.
+
+    Нічого не змінює: рахує з первинних даних і порівнює із center_month_balances,
+    тому саме тут видно розбіжності, залишені закритими місяцями.
+    """
     month = month or current_month()
     if not is_valid_month(month):
         raise ValueError("Місяць має бути у форматі YYYY-MM")
@@ -1593,7 +1716,7 @@ async def reconcile_month(month: str = None):
             continue
         prev_closing = None
         for m in months_range(st['start_month'], month):
-            data = await recalc_month(center_id, m)
+            data = await recalc_month(center_id, m, write=False)
             if not data:
                 prev_closing = None
                 continue
@@ -1605,13 +1728,17 @@ async def reconcile_month(month: str = None):
                     'detail': (f"залишок на початок {data['opening_balance']} "
                                f"!= залишок попереднього місяця {prev_closing}"),
                 })
-            if data.get('matches') is False:
+            snap = await _cash_snapshot(center_id, m)
+            if snap and (
+                abs(snap['closing_balance'] - data['closing_balance']) > 0.01
+                or abs(snap['spent'] - data['spent']) > 0.01
+            ):
                 issues.append({
                     'center_id': center_id,
                     'month': m,
                     'type': 'snapshot',
                     'detail': (f"розрахунок {data['closing_balance']} "
-                               f"!= знімок {data['snapshot']['closing_balance']}"),
+                               f"!= знімок {snap['closing_balance']}"),
                 })
             prev_closing = data['closing_balance']
     return {'month': month, 'issues': issues, 'ok': not issues}

@@ -494,3 +494,152 @@ async def remove_expense(user_id: int, expense_id: str, current_user: int = Depe
     if not success:
         raise HTTPException(status_code=404, detail="Запис не знайдено або немає доступу")
     return {"status": "ok"}
+
+
+# ==========================================
+# J. КОШТИ ЦН (КАСА) — АДМІНСЬКІ ОПЕРАЦІЇ (етап 3)
+# ==========================================
+
+CASH_OP_KINDS = ('funding', 'return', 'adjustment')
+CASH_METHODS = ('cash', 'bank')
+
+
+class CashSettingsData(BaseModel):
+    center_id: int
+    start_month: str
+    opening_balance: float = 0.0
+    note: Optional[str] = None
+
+
+class CashOperationData(BaseModel):
+    center_id: int
+    op_date: str
+    kind: str
+    amount: float
+    method: str = 'cash'
+    counterparty: Optional[str] = None
+    comment: Optional[str] = None
+
+
+class CashBatchItem(BaseModel):
+    center_id: int
+    amount: float
+
+
+class CashBatchFundingData(BaseModel):
+    op_date: str
+    method: str = 'cash'
+    counterparty: Optional[str] = None
+    comment: Optional[str] = None
+    amounts: List[CashBatchItem] = []
+
+
+def _require_admin(current_user: int):
+    if not database.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Доступ заборонено")
+
+
+async def _cash_notify_after(op: dict):
+    """Підсумок за місяцем операції + фонові сповіщення (не валять запит)."""
+    try:
+        summary = await database.get_cash_summary(op['center_id'], op['month'])
+        import cash_notify
+        cash_notify.after_operation(op, summary)
+        return summary
+    except Exception as e:
+        logging.error(f"cash notify ({op.get('id')}): {e}")
+        return None
+
+
+@app.get("/api/admin/cash/overview")
+async def admin_cash_overview(month: Optional[str] = None,
+                              current_user: int = Depends(get_current_user)):
+    """Стан коштів по всіх ЦН за місяць (таблиця адмінки)."""
+    _require_admin(current_user)
+    try:
+        data = await database.get_cash_admin_table(month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "data": data}
+
+
+@app.get("/api/admin/cash/ledger")
+async def admin_cash_ledger(center_id: int, month: Optional[str] = None,
+                            limit: int = 300,
+                            current_user: int = Depends(get_current_user)):
+    """Журнал руху коштів одного ЦН за місяць."""
+    _require_admin(current_user)
+    try:
+        data = await database.get_cash_ledger(center_id, month, limit=limit)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    centers = await database.get_centers()
+    data['center_name'] = next(
+        (c['name'] for c in centers if c['id'] == center_id), f"ЦН #{center_id}"
+    )
+    return {"status": "ok", "data": data}
+
+
+@app.post("/api/admin/cash/settings")
+async def admin_cash_settings(data: CashSettingsData,
+                              current_user: int = Depends(get_current_user)):
+    """Початок обліку та реальний залишок на 1-ше число місяця."""
+    _require_admin(current_user)
+    try:
+        settings = await database.set_cash_settings(
+            data.center_id, data.start_month, data.opening_balance,
+            note=(data.note or '').strip() or None, actor_id=current_user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "data": settings}
+
+
+@app.post("/api/admin/cash/operation")
+async def admin_cash_operation(data: CashOperationData,
+                               current_user: int = Depends(get_current_user)):
+    """Рух коштів: funding (+), return (−), adjustment (±)."""
+    _require_admin(current_user)
+    if data.kind not in CASH_OP_KINDS:
+        raise HTTPException(status_code=400, detail="Невідомий тип операції")
+    method = (data.method or 'cash').strip().lower()
+    if method not in CASH_METHODS:
+        raise HTTPException(status_code=400, detail="Спосіб має бути cash або bank")
+    try:
+        op = await database.add_cash_operation(
+            data.center_id, data.op_date, data.kind, data.amount,
+            method=method,
+            counterparty=(data.counterparty or '').strip() or None,
+            comment=(data.comment or '').strip() or None,
+            actor_id=current_user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    summary = await _cash_notify_after(op)
+    return {"status": "ok", "data": op, "summary": summary}
+
+
+@app.post("/api/admin/cash/funding-batch")
+async def admin_cash_funding_batch(data: CashBatchFundingData,
+                                   current_user: int = Depends(get_current_user)):
+    """Масова видача коштів по кількох ЦН одним batch_id."""
+    _require_admin(current_user)
+    amounts = {}
+    for item in data.amounts or []:
+        value = float(item.amount or 0)
+        if value > 0:
+            amounts[int(item.center_id)] = amounts.get(int(item.center_id), 0.0) + value
+    if not amounts:
+        raise HTTPException(status_code=400, detail="Не вказано жодної суми")
+    method = (data.method or 'cash').strip().lower()
+    if method not in CASH_METHODS:
+        raise HTTPException(status_code=400, detail="Спосіб має бути cash або bank")
+    result = await database.add_funding_batch(
+        amounts, data.op_date, method=method,
+        counterparty=(data.counterparty or '').strip() or None,
+        comment=(data.comment or '').strip() or None,
+        actor_id=current_user,
+    )
+    for op in result['created']:
+        await _cash_notify_after(op)
+    return {"status": "ok", "data": result}

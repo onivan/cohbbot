@@ -26,9 +26,13 @@
         .modal-content { background: white; padding: 20px; border-radius: 8px; max-width: 500px; margin: 0 auto; color: #000; max-height: calc(100vh - 40px); overflow-y: auto; }
         .modal-actions-top { position: sticky; top: -20px; margin: -20px -20px 12px -20px; padding: 20px 20px 10px 20px; background: white; display: flex; gap: 10px; justify-content: flex-end; align-items: center; z-index: 5; border-bottom: 1px solid #e0e0e0; }
         
-        .form-group { margin-bottom: 15px; }
+                .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
         .form-group input, .form-group select { width: 100%; padding: 8px; box-sizing: border-box; }
+
+        /* Компактні кнопки дій у таблицях */
+        .btn-mini { background: #607D8B; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer; margin: 0 2px 2px 0; }
+        .btn-mini:hover { opacity: 0.85; }
     </style>
 </head>
 <body>
@@ -42,6 +46,7 @@
         <button class="tab-btn" onclick="switchTab('centers')">Центри Надії</button>
         <button class="tab-btn" onclick="switchTab('categories')">Категорії</button>
         <button class="tab-btn" onclick="switchTab('matrix')">Матриця ЦН-Категорії</button>
+        <button class="tab-btn" onclick="switchTab('cash')">Кошти</button>
         <button class="tab-btn" onclick="switchTab('ai')">ШІ-моделі</button>
     </div>
 
@@ -111,6 +116,40 @@
                 </thead>
                 <tbody id="matrix-body">
                     <!-- Matrix will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="cash" class="tab-content">
+        <p style="margin-bottom: 15px; font-weight: bold;">Реальні гроші ЦН: скільки видали, скільки витратили, що залишилось. Плани та ліміти — в розділі «Бюджет».</p>
+
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
+            <label style="font-weight: bold;">Місяць:</label>
+            <input type="month" id="cash-month" onchange="loadCash()" style="padding: 6px;">
+            <button type="button" style="background: #2196F3; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="loadCash()">Оновити</button>
+            <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openCashBatchModal()">+ Масова видача</button>
+            <span id="cash-summary-line" style="margin-left: auto; font-weight: bold;"></span>
+        </div>
+
+        <div id="cash-warnings" style="margin-bottom: 15px;"></div>
+
+        <div style="overflow-x: auto;">
+            <table id="cash-table" style="min-width: 900px;">
+                <thead>
+                                        <tr>
+                        <th>ЦН</th>
+                        <th>Облік з</th>
+                        <th title="Залишок на 1-ше число місяця">На початок</th>
+                        <th title="Видача адміністратором мінус повернення, з урахуванням коригувань">Надійшло</th>
+                        <th title="Сума внесених витрат ЦН за місяць">Витрачено</th>
+                        <th title="На початок + надійшло − витрачено">Залишок</th>
+                        <th>Стан</th>
+                        <th>Дії</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Cash rows will be populated here -->
                 </tbody>
             </table>
         </div>
@@ -208,6 +247,140 @@
             <div class="form-group">
                 <label>Оберіть Центр Надії:</label>
                 <select id="u-center-select"></select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cash: налаштування обліку ЦН -->
+    <div id="cash-settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashSettingsModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCashSettings()">Зберегти</button>
+            </div>
+            <h3>Облік коштів ЦН</h3>
+            <p id="cash-settings-center" style="font-weight: bold;"></p>
+            <input type="hidden" id="cs-center-id">
+            <div class="form-group">
+                <label>Місяць початку обліку:</label>
+                <input type="month" id="cs-start-month">
+            </div>
+            <div class="form-group">
+                <label>Реальний залишок на 1-ше число цього місяця, грн:</label>
+                <input type="number" step="0.01" id="cs-opening" value="0">
+            </div>
+            <div class="form-group">
+                <label>Примітка (необов'язково):</label>
+                <input type="text" id="cs-note" placeholder="Напр.: залишок готівки в касі на 01.06">
+            </div>
+            <p style="font-size: 12px; color: #888;">Місяці до початку обліку не показуються. Зміна місяця початку видаляє старі знімки та перераховує залишки по всіх наступних місяцях.</p>
+        </div>
+    </div>
+
+    <!-- Cash: рух коштів (видача / повернення / коригування) -->
+    <div id="cash-op-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-actions-top">
+                <button type="button" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashOpModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCashOp()">Провести</button>
+            </div>
+            <h3 id="cash-op-title">Рух коштів</h3>
+            <p id="cash-op-center" style="font-weight: bold;"></p>
+            <div class="form-group">
+                <label>Дата:</label>
+                <input type="date" id="op-date">
+            </div>
+            <div class="form-group">
+                <label>Сума, грн:</label>
+                <input type="number" step="0.01" id="op-amount" placeholder="1500.00">
+            </div>
+            <div class="form-group">
+                <label>Спосіб:</label>
+                <select id="op-method">
+                    <option value="cash">Готівка</option>
+                    <option value="bank">Безготівка</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Контрагент (необов'язково):</label>
+                <input type="text" id="op-counterparty" placeholder="Хто видав / кому повернули">
+            </div>
+            <div class="form-group">
+                <label>Коментар:</label>
+                <input type="text" id="op-comment" placeholder="Призначення">
+            </div>
+            <p id="cash-op-hint" style="font-size: 12px; color: #888;"></p>
+        </div>
+    </div>
+
+    <!-- Cash: масова видача коштів -->
+    <div id="cash-batch-modal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-actions-top">
+                <button type="button" style="background: #f44336; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashBatchModal()">Скасувати</button>
+                <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="saveCashBatch()">Видати</button>
+            </div>
+            <h3>Масова видача коштів</h3>
+            <div class="form-group">
+                <label>Дата:</label>
+                <input type="date" id="cb-date">
+            </div>
+            <div class="form-group">
+                <label>Спосіб:</label>
+                <select id="cb-method">
+                    <option value="cash">Готівка</option>
+                    <option value="bank">Безготівка</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Контрагент (необов'язково):</label>
+                <input type="text" id="cb-counterparty">
+            </div>
+            <div class="form-group">
+                <label>Коментар:</label>
+                <input type="text" id="cb-comment" placeholder="Напр.: видача на червень">
+            </div>
+            <div style="overflow-x: auto;">
+                <table id="cash-batch-table">
+                    <thead>
+                        <tr>
+                            <th>ЦН</th>
+                            <th>Залишок</th>
+                            <th>Сума, грн</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Batch rows will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+            <p id="cash-batch-total" style="font-weight: bold;">Разом: 0,00 грн</p>
+        </div>
+    </div>
+
+    <!-- Cash: журнал руху коштів -->
+    <div id="cash-ledger-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-actions-top">
+                <button type="button" style="background: #607D8B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashLedgerModal()">Закрити</button>
+            </div>
+            <h3 id="cash-ledger-title">Журнал руху коштів</h3>
+            <div id="cash-ledger-summary" style="margin-bottom: 12px;"></div>
+            <div style="overflow-x: auto;">
+                <table id="cash-ledger-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Операція</th>
+                            <th>Сума</th>
+                            <th>Залишок</th>
+                            <th>Коментар</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Ledger rows will be populated here -->
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
