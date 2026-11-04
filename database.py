@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 import time
 from datetime import datetime
@@ -779,4 +780,883 @@ async def validate_auth_code(code: str) -> int:
                 await cur.execute("UPDATE auth_codes SET is_used = 1 WHERE code = %s", (code,))
                 return row['telegram_id']
     return None
+
+
+# ==========================================
+# 7. КОШТИ (КАСА ЦН)
+# ==========================================
+# `budgets` — планові ліміти по категоріях, вони не впливають на реальний залишок.
+# Реальні гроші ведуться тут:
+#   cash_operations       — надходження (funding), повернення (return), коригування (adjustment)
+#   expenses              — витрати (єдине джерело; журнал каси їх НЕ дублює)
+#   center_month_balances — зафіксовані залишки на місяць (еталон для звірки)
+#
+# opening(m) = opening_balance, якщо m = start_month, інакше closing(m-1)
+# closing(m) = opening(m) + received(m) - spent(m),  received = funding - return ± adjustment
+# Місяці до start_month не показуються взагалі.
+
+CASH_KINDS = ('funding', 'return', 'adjustment')
+
+_MONTH_RE = re.compile(r'^\d{4}-(0[1-9]|1[0-2])$')
+
+_CASH_DDL = (
+    """CREATE TABLE IF NOT EXISTS `center_cash_settings` (
+        `center_id` INT PRIMARY KEY COMMENT 'ЦН',
+        `start_month` CHAR(7) NOT NULL COMMENT 'Місяць початку обліку YYYY-MM',
+        `opening_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Реальний залишок на 1-ше start_month',
+        `note` VARCHAR(255) NULL,
+        `updated_by` BIGINT NULL,
+        `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT `fk_ccs_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`)
+            ON DELETE CASCADE ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS `cash_operations` (
+        `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+        `center_id` INT NOT NULL,
+        `op_date` DATE NOT NULL COMMENT 'Дата операції; визначає місяць обліку',
+        `kind` ENUM('funding','return','adjustment') NOT NULL,
+        `amount` DECIMAL(12, 2) NOT NULL COMMENT 'Сума за модулем (> 0)',
+        `signed_amount` DECIMAL(12, 2) NOT NULL COMMENT 'Знакова сума: + funding, - return, ± adjustment',
+        `method` ENUM('cash','bank') NOT NULL DEFAULT 'cash',
+        `counterparty` VARCHAR(191) NULL,
+        `comment` VARCHAR(255) NULL,
+        `batch_id` VARCHAR(64) NULL COMMENT 'Групує масову видачу по кількох ЦН',
+        `created_by` BIGINT NOT NULL COMMENT 'telegram_id адміна',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX `idx_cash_center_date` (`center_id`, `op_date`),
+        INDEX `idx_cash_batch` (`batch_id`),
+        CONSTRAINT `fk_cash_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`)
+            ON DELETE CASCADE ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS `center_month_balances` (
+        `center_id` INT NOT NULL,
+        `month` CHAR(7) NOT NULL COMMENT 'YYYY-MM',
+        `opening_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+        `received` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+        `spent` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+        `closing_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+        `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+        `computed_at` DATETIME NULL,
+        `closed_at` DATETIME NULL,
+        `closed_by` BIGINT NULL,
+        PRIMARY KEY (`center_id`, `month`),
+        CONSTRAINT `fk_cmb_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`)
+            ON DELETE CASCADE ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+    """CREATE TABLE IF NOT EXISTS `cash_audit` (
+        `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+        `center_id` INT NULL,
+        `month` CHAR(7) NULL,
+        `action` VARCHAR(64) NOT NULL,
+        `details` TEXT NULL,
+        `actor_id` BIGINT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX `idx_audit_month` (`month`, `center_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+)
+
+
+def is_valid_month(month) -> bool:
+    """Перевіряє формат місяця YYYY-MM."""
+    return bool(month) and bool(_MONTH_RE.match(str(month)))
+
+
+def _month_to_int(month: str) -> int:
+    y, m = str(month).split('-')
+    return int(y) * 12 + int(m) - 1
+
+
+def _int_to_month(value: int) -> str:
+    return f"{value // 12:04d}-{value % 12 + 1:02d}"
+
+
+def current_month() -> str:
+    return datetime.now().strftime("%Y-%m")
+
+
+def prev_month(month: str) -> str:
+    return _int_to_month(_month_to_int(month) - 1)
+
+
+def months_range(start_month: str, end_month: str) -> list:
+    """Перелік місяців YYYY-MM від start_month до end_month включно."""
+    if not (is_valid_month(start_month) and is_valid_month(end_month)):
+        return []
+    a, b = _month_to_int(start_month), _month_to_int(end_month)
+    return [_int_to_month(v) for v in range(a, b + 1)] if b >= a else []
+
+
+def _month_bounds(month: str):
+    """(перший день місяця, перший день наступного) — межі для діапазонних запитів."""
+    return f"{month}-01", f"{_int_to_month(_month_to_int(month) + 1)}-01"
+
+
+def _r2(value) -> float:
+    return round(float(value or 0), 2)
+
+
+async def ensure_cash_schema():
+    """Ідемпотентно створює таблиці обліку коштів (для вже розгорнутих БД)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for stmt in _CASH_DDL:
+                await cur.execute(stmt)
+            # Індекс для агрегації витрат по ЦН за період (може вже існувати)
+            try:
+                await cur.execute(
+                    "ALTER TABLE `expenses` ADD INDEX `idx_expenses_center_date` (`center_id`, `date`)"
+                )
+            except Exception:
+                pass
+
+
+async def _cash_audit(cur, action: str, center_id=None, month=None, details=None, actor_id=None):
+    """Запис у аудит обліку коштів (не ламає основну операцію при помилці)."""
+    try:
+        await cur.execute(
+            """INSERT INTO cash_audit (center_id, month, action, details, actor_id)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (center_id, month, action, details, actor_id)
+        )
+    except Exception as e:
+        logging.error(f"cash_audit({action}): {e}")
+
+
+# ---------- Налаштування обліку ----------
+
+async def get_cash_settings(center_id: int):
+    """Налаштування обліку коштів для ЦН або None, якщо облік не ведеться."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT center_id, start_month, opening_balance, note, updated_at
+                   FROM center_cash_settings WHERE center_id = %s""",
+                (center_id,)
+            )
+            row = await cur.fetchone()
+    return _cash_settings_row(row)
+
+
+def _cash_settings_row(row):
+    if not row:
+        return None
+    return {
+        'center_id': int(row['center_id']),
+        'start_month': str(row['start_month']),
+        'opening_balance': _r2(row['opening_balance']),
+        'note': row.get('note'),
+        'updated_at': str(row['updated_at']) if row.get('updated_at') else None,
+    }
+
+
+async def get_all_cash_settings() -> dict:
+    """{center_id: {'start_month', 'opening_balance'}} для всіх ЦН з обліком."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            return await _cash_settings_map(cur)
+
+
+async def _cash_settings_map(cur) -> dict:
+    await cur.execute(
+        "SELECT center_id, start_month, opening_balance FROM center_cash_settings"
+    )
+    rows = await cur.fetchall() or []
+    return {
+        int(r['center_id']): {
+            'start_month': str(r['start_month']),
+            'opening_balance': _r2(r['opening_balance']),
+        }
+        for r in rows
+    }
+
+
+async def set_cash_settings(center_id: int, start_month: str, opening_balance: float = 0,
+                            note: str = None, actor_id: int = None):
+    """Задає/оновлює початок обліку та реальний залишок на 1-ше число цього місяця."""
+    if not is_valid_month(start_month):
+        raise ValueError("Місяць початку обліку має бути у форматі YYYY-MM")
+    opening_balance = _r2(opening_balance)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO center_cash_settings
+                       (center_id, start_month, opening_balance, note, updated_by)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON DUPLICATE KEY UPDATE
+                       start_month = VALUES(start_month),
+                       opening_balance = VALUES(opening_balance),
+                       note = VALUES(note),
+                       updated_by = VALUES(updated_by)""",
+                (center_id, start_month, opening_balance, note, actor_id)
+            )
+            # Знімки до нового початку обліку стають неактуальними
+            await cur.execute(
+                "DELETE FROM center_month_balances WHERE center_id = %s AND month < %s",
+                (center_id, start_month)
+            )
+            await _cash_audit(
+                cur, 'settings', center_id, start_month,
+                f"start_month={start_month}, opening_balance={opening_balance}", actor_id
+            )
+    await recalc_chain(center_id, start_month)
+    return await get_cash_settings(center_id)
+
+
+# ---------- Агрегати ----------
+
+async def _cash_ops_agg(cur, center_id: int, date_from: str, date_to: str) -> dict:
+    """Надходження/повернення/коригування за період [date_from, date_to)."""
+    await cur.execute(
+        """SELECT
+               COALESCE(SUM(CASE WHEN kind = 'funding'    THEN amount ELSE 0 END), 0) AS funding,
+               COALESCE(SUM(CASE WHEN kind = 'return'     THEN amount ELSE 0 END), 0) AS returned,
+               COALESCE(SUM(CASE WHEN kind = 'adjustment' THEN signed_amount ELSE 0 END), 0) AS adjustment,
+               COALESCE(SUM(signed_amount), 0) AS net
+           FROM cash_operations
+           WHERE center_id = %s AND op_date >= %s AND op_date < %s""",
+        (center_id, date_from, date_to)
+    )
+    row = await cur.fetchone() or {}
+    return {
+        'funding': _r2(row.get('funding')),
+        'returned': _r2(row.get('returned')),
+        'adjustment': _r2(row.get('adjustment')),
+        'net': _r2(row.get('net')),
+    }
+
+
+async def _cash_spent_agg(cur, center_id: int, date_from: str, date_to: str) -> float:
+    """Витрати за період [date_from, date_to) — з таблиці expenses."""
+    await cur.execute(
+        """SELECT COALESCE(SUM(amount), 0) AS spent
+           FROM expenses
+           WHERE center_id = %s AND date >= %s AND date < %s""",
+        (center_id, date_from, date_to)
+    )
+    row = await cur.fetchone() or {}
+    return _r2(row.get('spent'))
+
+
+async def _cash_compute(cur, center_id: int, month: str):
+    """Розраховує суми за місяць з первинних даних (без знімків)."""
+    if not is_valid_month(month):
+        return None
+    await cur.execute(
+        "SELECT start_month, opening_balance FROM center_cash_settings WHERE center_id = %s",
+        (center_id,)
+    )
+    st = await cur.fetchone()
+    if not st:
+        return None
+    start_month = str(st['start_month'])
+    if _month_to_int(month) < _month_to_int(start_month):
+        return None
+
+    start_from, _ = _month_bounds(start_month)
+    month_from, month_to = _month_bounds(month)
+
+    before_ops = await _cash_ops_agg(cur, center_id, start_from, month_from)
+    before_spent = await _cash_spent_agg(cur, center_id, start_from, month_from)
+    opening = _r2(_r2(st['opening_balance']) + before_ops['net'] - before_spent)
+
+    ops = await _cash_ops_agg(cur, center_id, month_from, month_to)
+    spent = await _cash_spent_agg(cur, center_id, month_from, month_to)
+
+    return {
+        'configured': True,
+        'center_id': center_id,
+        'month': month,
+        'start_month': start_month,
+        'opening_balance': opening,
+        'funding': ops['funding'],
+        'returned': ops['returned'],
+        'adjustment': ops['adjustment'],
+        'received': ops['net'],
+        'spent': spent,
+        'closing_balance': _r2(opening + ops['net'] - spent),
+    }
+
+
+# ---------- Підсумок за місяць ----------
+
+async def get_cash_summary(center_id: int, month: str = None):
+    """Залишки ЦН за місяць: розрахунок + порівняння із зафіксованим знімком."""
+    month = month or current_month()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            data = await _cash_compute(cur, center_id, month)
+            if not data:
+                return {'configured': False, 'center_id': center_id, 'month': month}
+            await cur.execute(
+                """SELECT opening_balance, received, spent, closing_balance, status,
+                          computed_at, closed_at
+                   FROM center_month_balances
+                   WHERE center_id = %s AND month = %s""",
+                (center_id, month)
+            )
+            snap = await cur.fetchone()
+
+    if snap:
+        snapshot = {
+            'opening_balance': _r2(snap['opening_balance']),
+            'received': _r2(snap['received']),
+            'spent': _r2(snap['spent']),
+            'closing_balance': _r2(snap['closing_balance']),
+            'status': str(snap['status']),
+            'computed_at': str(snap['computed_at']) if snap.get('computed_at') else None,
+            'closed_at': str(snap['closed_at']) if snap.get('closed_at') else None,
+        }
+        data['status'] = snapshot['status']
+        data['matches'] = (
+            abs(snapshot['closing_balance'] - data['closing_balance']) < 0.01
+            and abs(snapshot['spent'] - data['spent']) < 0.01
+        )
+    else:
+        snapshot = None
+        data['status'] = 'open'
+        data['matches'] = None
+    data['snapshot'] = snapshot
+    return data
+
+
+# ---------- Журнал (рух коштів за місяць) ----------
+
+async def get_cash_ledger(center_id: int, month: str = None, limit: int = 300):
+    """Рух коштів за місяць із наростаючим залишком (надходження + витрати)."""
+    month = month or current_month()
+    month_from, month_to = _month_bounds(month)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            summary = await _cash_compute(cur, center_id, month)
+            if not summary:
+                return {'configured': False, 'center_id': center_id, 'month': month,
+                        'rows': [], 'summary': None}
+            await cur.execute(
+                """SELECT * FROM (
+                       SELECT o.op_date       AS d,
+                              o.created_at    AS ts,
+                              o.kind          AS kind,
+                              CASE o.kind
+                                  WHEN 'funding' THEN 'Надходження коштів'
+                                  WHEN 'return'  THEN 'Повернення коштів'
+                                  ELSE 'Коригування'
+                              END             AS title,
+                              NULL            AS category_name,
+                              o.comment       AS comment,
+                              o.signed_amount AS amount,
+                              NULL            AS ref_id
+                       FROM cash_operations o
+                       WHERE o.center_id = %s AND o.op_date >= %s AND o.op_date < %s
+                       UNION ALL
+                       SELECT e.date, e.created_at, 'expense', e.expense_name,
+                              c.name, NULL, -e.amount, e.id
+                       FROM expenses e
+                       LEFT JOIN categories c ON c.id = e.category_id
+                       WHERE e.center_id = %s AND e.date >= %s AND e.date < %s
+                   ) t
+                   ORDER BY t.d ASC, t.ts ASC
+                   LIMIT %s""",
+                (center_id, month_from, month_to,
+                 center_id, month_from, month_to, int(limit))
+            )
+            raw = await cur.fetchall() or []
+
+    balance = summary['opening_balance']
+    rows = []
+    for r in raw:
+        amount = _r2(r['amount'])
+        balance = _r2(balance + amount)
+        rows.append({
+            'date': str(r['d']),
+            'kind': str(r['kind']),
+            'title': r['title'],
+            'category_name': r['category_name'],
+            'comment': r['comment'],
+            'amount': amount,
+            'balance': balance,
+            'ref_id': r['ref_id'],
+        })
+    return {
+        'configured': True,
+        'center_id': center_id,
+        'month': month,
+        'summary': summary,
+        'rows': rows,
+        'truncated': len(rows) >= int(limit),
+    }
+
+
+# ---------- Огляд по роках / місяцях (адмінка) ----------
+
+async def get_cash_overview(year: int = None):
+    """Зведення «надійшло / витрачено / залишок» по всіх ЦН за рік, по місяцях.
+
+    Один набір агрегатних запитів на рік — без циклів по центрах.
+    """
+    year = int(year or datetime.now().year)
+    y_from, y_to = f"{year}-01-01", f"{year + 1}-01-01"
+    start_filter = "STR_TO_DATE(CONCAT(s.start_month, '-01'), '%%Y-%%m-%%d')"
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT id, name, city, is_active FROM centers ORDER BY name ASC")
+            centers = [
+                {'id': int(r['id']), 'name': r['name'], 'city': r['city'],
+                 'is_active': bool(r['is_active'])}
+                for r in (await cur.fetchall() or [])
+            ]
+            settings = await _cash_settings_map(cur)
+
+            # Стан на початок року (тільки в межах періоду обліку кожного ЦН)
+            await cur.execute(
+                f"""SELECT o.center_id AS cid, COALESCE(SUM(o.signed_amount), 0) AS net
+                    FROM cash_operations o
+                    JOIN center_cash_settings s ON s.center_id = o.center_id
+                    WHERE o.op_date < %s AND o.op_date >= {start_filter}
+                    GROUP BY o.center_id""",
+                (y_from,)
+            )
+            net_before = {int(r['cid']): _r2(r['net']) for r in await cur.fetchall() or []}
+
+            await cur.execute(
+                f"""SELECT e.center_id AS cid, COALESCE(SUM(e.amount), 0) AS spent
+                    FROM expenses e
+                    JOIN center_cash_settings s ON s.center_id = e.center_id
+                    WHERE e.date < %s AND e.date >= {start_filter}
+                    GROUP BY e.center_id""",
+                (y_from,)
+            )
+            spent_before = {int(r['cid']): _r2(r['spent']) for r in await cur.fetchall() or []}
+
+            await cur.execute(
+                """SELECT center_id AS cid, DATE_FORMAT(op_date, '%%Y-%%m') AS m,
+                          COALESCE(SUM(CASE WHEN kind = 'funding' THEN amount ELSE 0 END), 0) AS funding,
+                          COALESCE(SUM(CASE WHEN kind = 'return'  THEN amount ELSE 0 END), 0) AS returned,
+                          COALESCE(SUM(CASE WHEN kind = 'adjustment' THEN signed_amount ELSE 0 END), 0) AS adjustment,
+                          COALESCE(SUM(signed_amount), 0) AS net
+                   FROM cash_operations
+                   WHERE op_date >= %s AND op_date < %s
+                   GROUP BY center_id, m""",
+                (y_from, y_to)
+            )
+            ops_map = {
+                (int(r['cid']), str(r['m'])): {
+                    'funding': _r2(r['funding']),
+                    'returned': _r2(r['returned']),
+                    'adjustment': _r2(r['adjustment']),
+                    'net': _r2(r['net']),
+                }
+                for r in await cur.fetchall() or []
+            }
+
+            await cur.execute(
+                """SELECT center_id AS cid, DATE_FORMAT(date, '%%Y-%%m') AS m,
+                          COALESCE(SUM(amount), 0) AS spent
+                   FROM expenses
+                   WHERE date >= %s AND date < %s
+                   GROUP BY center_id, m""",
+                (y_from, y_to)
+            )
+            spent_map = {
+                (int(r['cid']), str(r['m'])): _r2(r['spent'])
+                for r in await cur.fetchall() or []
+            }
+
+            await cur.execute(
+                """SELECT center_id AS cid, month AS m, status, closing_balance, received, spent
+                   FROM center_month_balances
+                   WHERE month >= %s AND month < %s""",
+                (f"{year}-01", f"{year + 1}-01")
+            )
+            snap_map = {
+                (int(r['cid']), str(r['m'])): r
+                for r in await cur.fetchall() or []
+            }
+
+    running = {
+        cid: _r2(s['opening_balance'] + net_before.get(cid, 0.0) - spent_before.get(cid, 0.0))
+        for cid, s in settings.items()
+    }
+
+    totals_by_center = {
+        c['id']: {'funding': 0.0, 'returned': 0.0, 'adjustment': 0.0,
+                  'received': 0.0, 'spent': 0.0, 'closing_balance': 0.0}
+        for c in centers
+    }
+    months_out = []
+
+    for mi in range(1, 13):
+        m = f"{year}-{mi:02d}"
+        rows = []
+        t = {'funding': 0.0, 'returned': 0.0, 'adjustment': 0.0,
+             'received': 0.0, 'spent': 0.0, 'closing_balance': 0.0}
+
+        for c in centers:
+            cid = c['id']
+            s = settings.get(cid)
+            ops = ops_map.get((cid, m))
+            spent = spent_map.get((cid, m), 0.0)
+
+            if not s:
+                # Облік не налаштовано, але рухи/витрати вже є — показуємо як проблему
+                if ops or spent:
+                    rows.append({
+                        'center_id': cid, 'name': c['name'], 'configured': False,
+                        'start_month': None,
+                        'opening_balance': 0.0, 'funding': _r2(ops['funding']) if ops else 0.0,
+                        'returned': _r2(ops['returned']) if ops else 0.0,
+                        'adjustment': _r2(ops['adjustment']) if ops else 0.0,
+                        'received': _r2(ops['net']) if ops else 0.0,
+                        'spent': spent, 'closing_balance': None,
+                        'status': 'unconfigured', 'matches': None,
+                    })
+                continue
+
+            if _month_to_int(m) < _month_to_int(s['start_month']):
+                continue
+
+            opening = running.get(cid, 0.0)
+            received = _r2(ops['net']) if ops else 0.0
+            closing = _r2(opening + received - spent)
+            running[cid] = closing
+
+            snap = snap_map.get((cid, m))
+            if snap:
+                status = str(snap['status'])
+                matches = (
+                    abs(_r2(snap['closing_balance']) - closing) < 0.01
+                    and abs(_r2(snap['spent']) - spent) < 0.01
+                )
+            else:
+                status = 'open'
+                matches = None
+
+            row = {
+                'center_id': cid, 'name': c['name'], 'configured': True,
+                'start_month': s['start_month'],
+                'opening_balance': opening,
+                'funding': _r2(ops['funding']) if ops else 0.0,
+                'returned': _r2(ops['returned']) if ops else 0.0,
+                'adjustment': _r2(ops['adjustment']) if ops else 0.0,
+                'received': received,
+                'spent': spent,
+                'closing_balance': closing,
+                'status': status,
+                'matches': matches,
+            }
+            rows.append(row)
+
+            tc = totals_by_center[cid]
+            tc['funding'] = _r2(tc['funding'] + row['funding'])
+            tc['returned'] = _r2(tc['returned'] + row['returned'])
+            tc['adjustment'] = _r2(tc['adjustment'] + row['adjustment'])
+            tc['received'] = _r2(tc['received'] + received)
+            tc['spent'] = _r2(tc['spent'] + spent)
+            tc['closing_balance'] = closing
+
+            t['funding'] = _r2(t['funding'] + row['funding'])
+            t['returned'] = _r2(t['returned'] + row['returned'])
+            t['adjustment'] = _r2(t['adjustment'] + row['adjustment'])
+            t['received'] = _r2(t['received'] + received)
+            t['spent'] = _r2(t['spent'] + spent)
+            t['closing_balance'] = _r2(t['closing_balance'] + closing)
+
+        months_out.append({'month': m, 'rows': rows, 'totals': t})
+
+    centers_out = []
+    for c in centers:
+        tc = totals_by_center[c['id']]
+        centers_out.append({
+            'id': c['id'],
+            'name': c['name'],
+            'city': c['city'],
+            'is_active': c['is_active'],
+            'configured': c['id'] in settings,
+            'start_month': settings.get(c['id'], {}).get('start_month'),
+            'opening_balance': settings.get(c['id'], {}).get('opening_balance'),
+            'funding': tc['funding'],
+            'returned': tc['returned'],
+            'adjustment': tc['adjustment'],
+            'received': tc['received'],
+            'spent': tc['spent'],
+            'closing_balance': tc['closing_balance'],
+        })
+
+    year_totals = {k: 0.0 for k in ('funding', 'returned', 'adjustment', 'received', 'spent')}
+    for mo in months_out:
+        for k in year_totals:
+            year_totals[k] = _r2(year_totals[k] + mo['totals'][k])
+
+    return {
+        'year': year,
+        'months': months_out,
+        'centers': centers_out,
+        'totals': year_totals,
+        'unconfigured': [c['name'] for c in centers_out if not c['configured']],
+    }
+
+
+# ---------- Перерахунок знімків ----------
+
+async def recalc_month(center_id: int, month: str, force: bool = False):
+    """Перераховує та зберігає знімок місяця.
+
+    force=False — закритий місяць не перезаписується;
+    force=True  — перезаписує (після зміни налаштувань або при закритті місяця).
+    """
+    if not is_valid_month(month):
+        return None
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                "SELECT status FROM center_month_balances WHERE center_id = %s AND month = %s",
+                (center_id, month)
+            )
+            existing = await cur.fetchone()
+            if existing and str(existing['status']) == 'closed' and not force:
+                return await _cash_compute(cur, center_id, month)
+            data = await _cash_compute(cur, center_id, month)
+            if not data:
+                return None
+
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO center_month_balances
+                       (center_id, month, opening_balance, received, spent, closing_balance,
+                        status, computed_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'open', NOW())
+                   ON DUPLICATE KEY UPDATE
+                       opening_balance = VALUES(opening_balance),
+                       received = VALUES(received),
+                       spent = VALUES(spent),
+                       closing_balance = VALUES(closing_balance),
+                       computed_at = NOW()""",
+                (center_id, month, data['opening_balance'], data['received'],
+                 data['spent'], data['closing_balance'])
+            )
+    return data
+
+
+async def recalc_chain(center_id: int, from_month: str):
+    """Перераховує знімки від from_month до поточного місяця включно.
+
+    Залишок кожного місяця залежить від попереднього, тому зміна в минулому
+    зобов'язує перерахувати весь ланцюжок далі (закриті місяці — примусово).
+    """
+    settings_row = await get_cash_settings(center_id)
+    if not settings_row:
+        return []
+    start = max(_month_to_int(from_month), _month_to_int(settings_row['start_month']))
+    end = _month_to_int(current_month())
+    touched = []
+    for value in range(start, end + 1):
+        data = await recalc_month(center_id, _int_to_month(value), force=True)
+        if data:
+            touched.append(_int_to_month(value))
+    return touched
+
+
+async def touch_cash_month(center_id: int, day, actor_id: int = None, reason: str = None):
+    """Хук для витрат/операцій у минулому місяці: перерахувати ланцюжок залишків."""
+    month = str(day)[:7]
+    if not is_valid_month(month):
+        return []
+    touched = await recalc_chain(center_id, month)
+    if touched:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await _cash_audit(
+                    cur, 'recalc', center_id, month,
+                    reason or f"перераховано {touched[0]}..{touched[-1]}", actor_id
+                )
+    return touched
+
+
+# ---------- Закриття місяця та звірка ----------
+
+async def close_month(month: str, actor_id: int = None):
+    """Фіксує залишки всіх ЦН на кінець місяця: знімки стають status='closed'."""
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+
+    settings = await get_all_cash_settings()
+    closed, skipped = [], []
+    for center_id, st in settings.items():
+        if _month_to_int(month) < _month_to_int(st['start_month']):
+            skipped.append(center_id)
+            continue
+        data = await recalc_month(center_id, month, force=True)
+        if not data:
+            skipped.append(center_id)
+            continue
+        closed.append(data)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE center_month_balances
+                   SET status = 'closed', closed_at = NOW(), closed_by = %s
+                   WHERE month = %s AND status = 'open'""",
+                (actor_id, month)
+            )
+            locked = cur.rowcount
+            await _cash_audit(
+                cur, 'close_month', None, month,
+                f"закрито ЦН: {len(closed)}, пропущено: {len(skipped)}", actor_id
+            )
+    return {'month': month, 'closed': closed, 'skipped': skipped, 'locked_rows': locked}
+
+
+async def reopen_month(month: str, actor_id: int = None, reason: str = None):
+    """Знімає фіксацію місяця (після цього знімки перераховуються звичайним шляхом)."""
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE center_month_balances
+                   SET status = 'open', closed_at = NULL, closed_by = NULL
+                   WHERE month = %s AND status = 'closed'""",
+                (month,)
+            )
+            affected = cur.rowcount
+            await _cash_audit(
+                cur, 'reopen_month', None, month,
+                reason or f"відкрито знімків: {affected}", actor_id
+            )
+    return {'month': month, 'reopened': affected}
+
+
+async def reconcile_month(month: str = None):
+    """Подвійна перевірка: неперервність ланцюжка залишків і збіг зі знімками."""
+    month = month or current_month()
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+
+    settings = await get_all_cash_settings()
+    issues = []
+    for center_id, st in settings.items():
+        if _month_to_int(month) < _month_to_int(st['start_month']):
+            continue
+        prev_closing = None
+        for m in months_range(st['start_month'], month):
+            data = await recalc_month(center_id, m)
+            if not data:
+                prev_closing = None
+                continue
+            if prev_closing is not None and abs(data['opening_balance'] - prev_closing) > 0.01:
+                issues.append({
+                    'center_id': center_id,
+                    'month': m,
+                    'type': 'chain',
+                    'detail': (f"залишок на початок {data['opening_balance']} "
+                               f"!= залишок попереднього місяця {prev_closing}"),
+                })
+            if data.get('matches') is False:
+                issues.append({
+                    'center_id': center_id,
+                    'month': m,
+                    'type': 'snapshot',
+                    'detail': (f"розрахунок {data['closing_balance']} "
+                               f"!= знімок {data['snapshot']['closing_balance']}"),
+                })
+            prev_closing = data['closing_balance']
+    return {'month': month, 'issues': issues, 'ok': not issues}
+
+
+# ---------- Операції з коштами ----------
+
+async def add_cash_operation(center_id: int, op_date, kind: str, amount: float,
+                             method: str = 'cash', counterparty: str = None,
+                             comment: str = None, actor_id: int = None,
+                             batch_id: str = None):
+    """Додає рух коштів: funding (+), return (−), adjustment (±, знак зберігається)."""
+    if kind not in CASH_KINDS:
+        raise ValueError("Невідомий тип операції")
+
+    day = str(op_date)[:10]
+    datetime.strptime(day, "%Y-%m-%d")
+    month = day[:7]
+
+    settings_row = await get_cash_settings(center_id)
+    if not settings_row:
+        raise ValueError("Для цього ЦН не налаштовано облік коштів")
+    if month < settings_row['start_month']:
+        raise ValueError(f"Місяць операції раніше початку обліку ({settings_row['start_month']})")
+
+    raw = float(amount)
+    value = _r2(abs(raw))
+    if value <= 0:
+        raise ValueError("Сума має бути більше нуля")
+    signed = _r2(raw) if kind == 'adjustment' else (value if kind == 'funding' else -value)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO cash_operations
+                       (center_id, op_date, kind, amount, signed_amount, method,
+                        counterparty, comment, batch_id, created_by)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (center_id, day, kind, value, signed, method or 'cash',
+                 counterparty, comment, batch_id, actor_id)
+            )
+            op_id = cur.lastrowid
+            await _cash_audit(
+                cur, kind, center_id, month,
+                f"op#{op_id} {signed} {comment or ''}".strip(), actor_id
+            )
+
+    touched = await recalc_chain(center_id, month)
+    return {
+        'id': op_id,
+        'center_id': center_id,
+        'op_date': day,
+        'month': month,
+        'kind': kind,
+        'amount': value,
+        'signed_amount': signed,
+        'method': method or 'cash',
+        'recalculated': touched,
+    }
+
+
+async def add_funding_batch(amounts_by_center: dict, op_date, method: str = 'cash',
+                            counterparty: str = None, comment: str = None,
+                            actor_id: int = None):
+    """Масова видача коштів: {center_id: amount}, спільний batch_id для всіх рядків."""
+    batch_id = uuid.uuid4().hex[:16]
+    created, errors = [], []
+    for center_id, amount in (amounts_by_center or {}).items():
+        try:
+            if _r2(amount) <= 0:
+                continue
+            created.append(await add_cash_operation(
+                int(center_id), op_date, 'funding', amount, method=method,
+                counterparty=counterparty, comment=comment,
+                actor_id=actor_id, batch_id=batch_id,
+            ))
+        except Exception as e:
+            errors.append({'center_id': center_id, 'error': str(e)})
+    return {
+        'batch_id': batch_id,
+        'created': created,
+        'errors': errors,
+        'total': _r2(sum(c['amount'] for c in created)),
+    }
 

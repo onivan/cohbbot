@@ -37,6 +37,12 @@ async def main():
     except Exception as e:
         logging.error(f"Не вдалося ініціалізувати схему AI: {e}")
 
+    # 0.1 Таблиці обліку коштів ЦН (каса) — також ідемпотентно
+    try:
+        await database.ensure_cash_schema()
+    except Exception as e:
+        logging.error(f"Не вдалося ініціалізувати схему коштів: {e}")
+
     # 1. Завантажуємо користувачів із MySQL
     await database.load_users()
     

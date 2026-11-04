@@ -107,6 +107,74 @@ CREATE TABLE IF NOT EXISTS `auth_codes` (
     INDEX `idx_auth_tg` (`telegram_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ==========================================================
+-- ОБЛІК РЕАЛЬНИХ КОШТІВ (КАСА ЦН)
+-- Бюджети (`budgets`) — це планові ліміти по категоріях, вони НЕ впливають
+-- на реальний залишок коштів. Реальні гроші ведуться тут:
+--   рух коштів усередину  -> cash_operations
+--   витрати               -> expenses (єдине джерело, без дублювання)
+--   зафіксовані залишки   -> center_month_balances (еталон для звірки)
+-- ==========================================================
+
+-- 9. Налаштування обліку коштів для ЦН
+CREATE TABLE IF NOT EXISTS `center_cash_settings` (
+    `center_id` INT PRIMARY KEY COMMENT 'ЦН',
+    `start_month` CHAR(7) NOT NULL COMMENT 'Місяць початку обліку YYYY-MM',
+    `opening_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Реальний залишок на 1-ше start_month',
+    `note` VARCHAR(255) NULL,
+    `updated_by` BIGINT NULL,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT `fk_ccs_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. Касові операції (надходження, повернення, коригування)
+CREATE TABLE IF NOT EXISTS `cash_operations` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `center_id` INT NOT NULL,
+    `op_date` DATE NOT NULL COMMENT 'Дата операції; визначає місяць обліку',
+    `kind` ENUM('funding','return','adjustment') NOT NULL
+        COMMENT 'funding = видача коштів ЦН (+), return = повернення адміну (-), adjustment = коригування (±)',
+    `amount` DECIMAL(12, 2) NOT NULL COMMENT 'Сума за модулем (> 0)',
+    `signed_amount` DECIMAL(12, 2) NOT NULL COMMENT 'Знакова сума: + funding, - return, ± adjustment',
+    `method` ENUM('cash','bank') NOT NULL DEFAULT 'cash' COMMENT 'Готівка/банк (у звітах поки не розділяється)',
+    `counterparty` VARCHAR(191) NULL COMMENT 'Хто видав/прийняв кошти',
+    `comment` VARCHAR(255) NULL,
+    `batch_id` VARCHAR(64) NULL COMMENT 'Групує масову видачу по кількох ЦН',
+    `created_by` BIGINT NOT NULL COMMENT 'telegram_id адміна',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_cash_center_date` (`center_id`, `op_date`),
+    INDEX `idx_cash_batch` (`batch_id`),
+    CONSTRAINT `fk_cash_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 11. Місячні знімки залишків (еталон для подвійної перевірки)
+CREATE TABLE IF NOT EXISTS `center_month_balances` (
+    `center_id` INT NOT NULL,
+    `month` CHAR(7) NOT NULL COMMENT 'YYYY-MM',
+    `opening_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Залишок на 1-ше місяця',
+    `received` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Чисте надходження за місяць (funding - return ± adjustment)',
+    `spent` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Витрати за місяць (з expenses)',
+    `closing_balance` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Залишок на кінець місяця',
+    `status` ENUM('open','closed') NOT NULL DEFAULT 'open' COMMENT 'closed = зафіксовано, не перераховується',
+    `computed_at` DATETIME NULL,
+    `closed_at` DATETIME NULL,
+    `closed_by` BIGINT NULL,
+    PRIMARY KEY (`center_id`, `month`),
+    CONSTRAINT `fk_cmb_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 12. Аудит обліку коштів
+CREATE TABLE IF NOT EXISTS `cash_audit` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `center_id` INT NULL,
+    `month` CHAR(7) NULL,
+    `action` VARCHAR(64) NOT NULL COMMENT 'settings/funding/return/adjustment/close_month/reopen_month/recalc/mismatch',
+    `details` TEXT NULL,
+    `actor_id` BIGINT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_audit_month` (`month`, `center_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Базові початкові категорії
 INSERT IGNORE INTO `categories` (`id`, `name`, `sort_order`, `is_active`) VALUES
 ('cat_food', 'Продукти', 1, 1),
