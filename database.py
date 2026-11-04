@@ -1003,7 +1003,7 @@ async def set_cash_settings(center_id: int, start_month: str, opening_balance: f
                 cur, 'settings', center_id, start_month,
                 f"start_month={start_month}, opening_balance={opening_balance}", actor_id
             )
-    await recalc_chain(center_id, start_month)
+    await recalc_chain(center_id, start_month, actor_id=actor_id)
     return await get_cash_settings(center_id)
 
 
@@ -1407,11 +1407,13 @@ async def get_cash_overview(year: int = None):
 
 # ---------- Перерахунок знімків ----------
 
-async def recalc_month(center_id: int, month: str, force: bool = False):
+async def recalc_month(center_id: int, month: str, force: bool = False,
+                       reopen: bool = False, actor_id: int = None):
     """Перераховує та зберігає знімок місяця.
 
-    force=False — закритий місяць не перезаписується;
-    force=True  — перезаписує (після зміни налаштувань або при закритті місяця).
+    force=False  — закритий місяць не перезаписується;
+    force=True   — перезаписує (після зміни налаштувань або при закритті місяця);
+    reopen=True  — закритий місяць спершу відкривається (+ запис у аудит).
     """
     if not is_valid_month(month):
         return None
@@ -1424,8 +1426,20 @@ async def recalc_month(center_id: int, month: str, force: bool = False):
                 (center_id, month)
             )
             existing = await cur.fetchone()
-            if existing and str(existing['status']) == 'closed' and not force:
-                return await _cash_compute(cur, center_id, month)
+            if existing and str(existing['status']) == 'closed':
+                if not force:
+                    return await _cash_compute(cur, center_id, month)
+                if reopen:
+                    await cur.execute(
+                        """UPDATE center_month_balances
+                           SET status = 'open', closed_at = NULL, closed_by = NULL
+                           WHERE center_id = %s AND month = %s""",
+                        (center_id, month)
+                    )
+                    await _cash_audit(
+                        cur, 'reopen_month', center_id, month,
+                        'відкрито для перерахунку після зміни даних', actor_id
+                    )
             data = await _cash_compute(cur, center_id, month)
             if not data:
                 return None
@@ -1448,20 +1462,44 @@ async def recalc_month(center_id: int, month: str, force: bool = False):
     return data
 
 
-async def recalc_chain(center_id: int, from_month: str):
+async def recalc_chain(center_id: int, from_month: str, actor_id: int = None):
     """Перераховує знімки від from_month до поточного місяця включно.
 
     Залишок кожного місяця залежить від попереднього, тому зміна в минулому
-    зобов'язує перерахувати весь ланцюжок далі (закриті місяці — примусово).
+    зобов'язує перерахувати весь ланцюжок далі (закриті місяці відкриваються
+    з записом у cash_audit). Якщо from_month у майбутньому — рахуємо до нього.
     """
     settings_row = await get_cash_settings(center_id)
     if not settings_row:
         return []
     start = max(_month_to_int(from_month), _month_to_int(settings_row['start_month']))
+
+    # Кінець ланцюжка: поточний місяць або останній місяць, де вже є дані/знімок
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT GREATEST(
+                       COALESCE((SELECT MAX(month) FROM center_month_balances
+                                 WHERE center_id = %s), ''),
+                       COALESCE((SELECT DATE_FORMAT(MAX(op_date), '%%Y-%%m')
+                                 FROM cash_operations WHERE center_id = %s), ''),
+                       COALESCE((SELECT DATE_FORMAT(MAX(date), '%%Y-%%m')
+                                 FROM expenses WHERE center_id = %s), '')
+                   ) AS last_month""",
+                (center_id, center_id, center_id)
+            )
+            row = await cur.fetchone()
+    last_month = str(row[0]) if row and row[0] else ''
     end = _month_to_int(current_month())
+    if is_valid_month(last_month):
+        end = max(end, _month_to_int(last_month))
+    end = max(end, start)
+
     touched = []
     for value in range(start, end + 1):
-        data = await recalc_month(center_id, _int_to_month(value), force=True)
+        data = await recalc_month(center_id, _int_to_month(value),
+                                  force=True, reopen=True, actor_id=actor_id)
         if data:
             touched.append(_int_to_month(value))
     return touched
@@ -1472,7 +1510,7 @@ async def touch_cash_month(center_id: int, day, actor_id: int = None, reason: st
     month = str(day)[:7]
     if not is_valid_month(month):
         return []
-    touched = await recalc_chain(center_id, month)
+    touched = await recalc_chain(center_id, month, actor_id=actor_id)
     if touched:
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -1622,7 +1660,7 @@ async def add_cash_operation(center_id: int, op_date, kind: str, amount: float,
                 f"op#{op_id} {signed} {comment or ''}".strip(), actor_id
             )
 
-    touched = await recalc_chain(center_id, month)
+    touched = await recalc_chain(center_id, month, actor_id=actor_id)
     return {
         'id': op_id,
         'center_id': center_id,
