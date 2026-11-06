@@ -497,6 +497,67 @@ async def remove_expense(user_id: int, expense_id: str, current_user: int = Depe
 
 
 # ==========================================
+# J. КОШТИ ЦН (КАСА) — ПЕРЕГЛЯД ДЛЯ КОРИСТУВАЧА (етап 2)
+# ==========================================
+# Юзер бачить лише кошти свого ЦН; адмін — будь-якого (у нього є й адмінка).
+# Ендпоінти лише читають: жодних операцій зі зміни залишку тут немає.
+
+async def _cash_center_for(user_id: int, center_id: Optional[int] = None) -> int:
+    """ЦН для перегляду коштів: явно вказаний (адмін) або власний ЦН користувача."""
+    u_info = database.users_cache.get(str(user_id), {})
+    own = u_info.get("center_id")
+    if not own:
+        own = await database.get_user_center_id(user_id)
+    try:
+        own = int(own) if own not in (None, "", 0) else None
+    except (TypeError, ValueError):
+        own = None
+
+    if center_id is None:
+        if own is None:
+            raise HTTPException(status_code=404, detail="Центр не призначено")
+        return own
+
+    try:
+        center_id = int(center_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Некоректний center_id")
+
+    if own is not None and center_id == own:
+        return own
+    if database.is_admin(user_id):
+        return center_id
+    raise HTTPException(status_code=403, detail="Доступ лише до коштів свого ЦН")
+
+
+def _check_month(month: Optional[str]) -> None:
+    if month and not database.is_valid_month(month):
+        raise HTTPException(status_code=400, detail="Місяць має бути у форматі YYYY-MM")
+
+
+@app.get("/api/cash/summary")
+async def cash_summary_user(center_id: Optional[int] = None, month: Optional[str] = None,
+                            current_user: int = Depends(get_current_user)):
+    """Залишки коштів ЦН за місяць (read-only, вкладка «💰 Кошти»)."""
+    cid = await _cash_center_for(current_user, center_id)
+    _check_month(month)
+    data = await database.get_cash_summary(cid, month)
+    return {"status": "ok", "data": data}
+
+
+@app.get("/api/cash/ledger")
+async def cash_ledger_user(center_id: Optional[int] = None, month: Optional[str] = None,
+                           limit: int = 200,
+                           current_user: int = Depends(get_current_user)):
+    """Рух коштів ЦН за місяць із наростаючим залишком (read-only)."""
+    cid = await _cash_center_for(current_user, center_id)
+    _check_month(month)
+    limit = max(1, min(int(limit), 500))
+    data = await database.get_cash_ledger(cid, month, limit=limit)
+    return {"status": "ok", "data": data}
+
+
+# ==========================================
 # J. КОШТИ ЦН (КАСА) — АДМІНСЬКІ ОПЕРАЦІЇ (етап 3)
 # ==========================================
 

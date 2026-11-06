@@ -170,14 +170,17 @@ function getBudgetCenterId() {
 
 // Кнопки дій: додавати витрати можна лише у свій ЦН
 function updateActionButtons() {
-    const btnAdd = document.getElementById('btn-add-expense');
+        const btnAdd = document.getElementById('btn-add-expense');
     const btnBudget = document.getElementById('btn-my-budget');
+    const btnCash = document.getElementById('btn-my-cash');
     const hasOwnCenter = !!currentUserCenterId;
     const selected = getSelectedCenterId();
     const viewingOwnCenter = !selected || String(selected) === String(currentUserCenterId);
 
     if (btnAdd) btnAdd.style.display = (hasOwnCenter && viewingOwnCenter) ? 'inline-block' : 'none';
     if (btnBudget) btnBudget.style.display = hasOwnCenter ? 'inline-block' : 'none';
+    // Кошти: свій ЦН, а адміну — ще й обраний у фільтрі (read-only перегляд)
+    if (btnCash) btnCash.style.display = (hasOwnCenter || !!selected) ? 'inline-block' : 'none';
 }
 
 function checkUserRole() {
@@ -379,16 +382,16 @@ function openMyBudgetModal() {
     const centerFilter = document.getElementById('main-center-filter');
     const titleEl = document.getElementById('my-budget-title');
     if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
-        const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text.replace(/ ⭐/g, '') : '';
-        if (titleEl) titleEl.textContent = `Бюджет ЦН ${centerName}`;
+                const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text.replace(/ ⭐/g, '') : '';
+        if (titleEl) titleEl.textContent = `Ліміти ЦН ${centerName}`;
     } else {
         fetch(`/api/user/${userId}/center`)
             .then(r => r.json())
             .then(res => {
-                if (titleEl) titleEl.textContent = `Бюджет ЦН ${res.center || ''}`;
+                if (titleEl) titleEl.textContent = `Ліміти ЦН ${res.center || ''}`;
             })
             .catch(() => {
-                if (titleEl) titleEl.textContent = 'Бюджет мого ЦН';
+                if (titleEl) titleEl.textContent = 'Ліміти мого ЦН';
             });
     }
     loadMyBudget();
@@ -1293,6 +1296,150 @@ function viewAttachedReceipt() {
     if (currentPath) openReceipt(currentPath);
 }
 
+// ==========================================
+// КОШТИ ЦН (КОРИСТУВАЧ, READ-ONLY) — етап J2
+// Дані з /api/cash/summary та /api/cash/ledger. Жодних змін тут немає:
+// операції з коштами доступні лише адміну (адмінка /admin).
+// ==========================================
+
+function fmtMoney(value) {
+    const num = Number(value || 0);
+    return num.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function cashEsc(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function openMyCashModal() {
+    const modal = document.getElementById('my-cash-modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+
+    const monthEl = document.getElementById('my-cash-month');
+    if (monthEl && !monthEl.value) {
+        monthEl.value = new Date().toISOString().slice(0, 7);
+    }
+
+    const titleEl = document.getElementById('my-cash-title');
+    const centerFilter = document.getElementById('main-center-filter');
+    const selected = getSelectedCenterId();
+
+    if (titleEl && currentUserRole === 'admin' && selected && centerFilter) {
+        const opt = centerFilter.options[centerFilter.selectedIndex];
+        const centerName = opt ? opt.text.replace(/ ⭐/g, '') : '';
+        titleEl.textContent = `Кошти ЦН ${centerName}`;
+    } else if (titleEl) {
+        fetch(`/api/user/${userId}/center`)
+            .then(r => r.json())
+            .then(res => { titleEl.textContent = `Кошти ЦН ${res.center || ''}`; })
+            .catch(() => { titleEl.textContent = 'Кошти ЦН'; });
+    }
+
+    loadMyCash();
+}
+
+function closeMyCashModal() {
+    const modal = document.getElementById('my-cash-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function loadMyCash() {
+    const monthEl = document.getElementById('my-cash-month');
+    const month = monthEl ? monthEl.value : '';
+    const list = document.getElementById('my-cash-list');
+    if (!month || !userId || !list) return;
+
+    const centerId = getBudgetCenterId();
+    if (!centerId) {
+        list.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">Центр не призначено.</div>';
+        return;
+    }
+
+    list.innerHTML = 'Завантаження...';
+    const query = `center_id=${centerId}&month=${encodeURIComponent(month)}`;
+
+    Promise.all([
+        fetch(`/api/cash/summary?${query}`).then(r => r.json()),
+        fetch(`/api/cash/ledger?${query}&limit=200`).then(r => r.json())
+    ])
+        .then(([sumRes, ledRes]) => {
+            const sum = (sumRes && sumRes.data) || {};
+            if (!sum.configured) {
+                const cards = document.getElementById('my-cash-cards');
+                const note = document.getElementById('my-cash-note');
+                if (cards) cards.style.display = 'none';
+                if (note) note.textContent = '';
+                list.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">' +
+                    'Облік коштів для цього ЦН не ведеться (або обраний місяць раніше його початку).' +
+                    '</div>';
+                return;
+            }
+            renderMyCash(sum, (ledRes && ledRes.data) || {});
+        })
+        .catch(err => {
+            list.innerHTML = `<div style="text-align:center; color:#C62828; padding:16px;">Не вдалося завантажити: ${cashEsc(err)}</div>`;
+        });
+}
+
+function renderMyCash(sum, ledger) {
+    const cards = document.getElementById('my-cash-cards');
+    const note = document.getElementById('my-cash-note');
+    const list = document.getElementById('my-cash-list');
+    if (!cards || !note || !list) return;
+
+    const closing = Number(sum.closing_balance || 0);
+    document.getElementById('my-cash-received').textContent = fmtMoney(sum.received);
+    document.getElementById('my-cash-spent').textContent = fmtMoney(sum.spent);
+    const closingEl = document.getElementById('my-cash-closing');
+    closingEl.textContent = fmtMoney(closing);
+    closingEl.style.color = closing < 0 ? '#C62828' : '';
+    cards.style.display = 'grid';
+
+    const bits = [
+        `Початок обліку: ${sum.start_month}`,
+        `залишок на 1-ше: ${fmtMoney(sum.opening_balance)} грн`
+    ];
+    if (sum.status === 'closed') bits.push('місяць закрито');
+    if (sum.matches === false) bits.push('⚠️ розрахунок не збігається зі знімком');
+    note.textContent = bits.join(' · ');
+
+    const rows = (ledger && ledger.rows) || [];
+    if (!rows.length) {
+        list.innerHTML = '<div style="text-align:center; color:#888; padding:16px;">Руху коштів за цей місяць немає.</div>';
+        return;
+    }
+
+    let html = rows.map(row => {
+        const amount = Number(row.amount || 0);
+        const color = amount >= 0 ? '#2E7D32' : '#C62828';
+        const sign = amount >= 0 ? '+' : '−';
+        const rawDate = String(row.date || '');
+        const day = rawDate.length >= 10 ? `${rawDate.slice(8, 10)}.${rawDate.slice(5, 7)}` : rawDate;
+        const sub = [row.category_name, row.comment].filter(Boolean).join(' · ');
+        return `<div style="display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid rgba(128,128,128,0.25);">
+            <div style="min-width:0;">
+                <div style="font-size:0.9em;">${day} · ${cashEsc(row.title)}</div>
+                ${sub ? `<div style="font-size:0.75em; color:#888;">${cashEsc(sub)}</div>` : ''}
+            </div>
+            <div style="text-align:right; white-space:nowrap;">
+                <div style="color:${color}; font-weight:bold;">${sign}${fmtMoney(Math.abs(amount))}</div>
+                <div style="font-size:0.75em; color:#888;">${fmtMoney(row.balance)}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    if (ledger.truncated) {
+        html += `<div style="text-align:center; font-size:0.75em; color:#888; padding:8px 0;">Показано перші ${rows.length} записів.</div>`;
+    }
+    list.innerHTML = html;
+}
+
 function closeForm() { document.getElementById('modal').style.display = 'none'; }
 function closeMyBudgetModal() { document.getElementById('my-budget-modal').style.display = 'none'; }
 function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
@@ -1463,6 +1610,7 @@ function renderCategorySelectOptions() {
 // ==========================================
 // Порядок у списку = порядок «зверху вниз»: першою закривається та, що відкрита зверху
 const MODAL_CLOSERS = [
+    { id: 'my-cash-modal', close: () => closeMyCashModal() },
     { id: 'receipt-modal', close: () => closeReceipt() },
     { id: 'admin-budgets-modal', close: () => closeAdminModal() },
     { id: 'my-budget-modal', close: () => closeMyBudgetModal() },

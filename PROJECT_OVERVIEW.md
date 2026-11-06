@@ -159,6 +159,8 @@ receipts/            # Завантажені фото чеків (створю�
 **Завантаження:** `POST /api/upload/{user_id}` (фото чека → `receipts/USER/YYYY/MM/...`)
 **Бюджети:** `GET /api/budgets/{user_id}?month=`, `GET /api/budgets/center/{center_id}?month=`,
 `POST /api/admin/budgets`
+**Кошти ЦН (read-only):** `GET /api/cash/summary?center_id=&month=`, `GET /api/cash/ledger?center_id=&month=`
+(без `center_id` — власний ЦН; чужий ЦН → 403, адміну дозволено будь-який; операції — `/api/admin/cash/*`)
 **Адмін:** `GET /api/admin/users`, `PUT /api/admin/users/{id}/center`,
 `GET/POST /api/admin/categories`, `PUT /api/admin/categories/{id}`,
 `GET /api/admin/matrix`, `POST /api/admin/matrix/toggle`,
