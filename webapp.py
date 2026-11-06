@@ -751,6 +751,34 @@ def _csv_money(value) -> str:
         return str(value)
 
 
+# Кирилиця → латиниця для імені файлу: HTTP-заголовки не приймають не-latin-1.
+_CSV_TRANSLIT = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'h', 'ґ': 'g', 'д': 'd', 'е': 'e', 'є': 'ie',
+    'ж': 'zh', 'з': 'z', 'и': 'y', 'і': 'i', 'ї': 'i', 'й': 'i', 'к': 'k', 'л': 'l',
+    'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+    'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ь': '',
+    'ю': 'iu', 'я': 'ia', 'ы': 'y', 'э': 'e', 'ё': 'e', 'ъ': '',
+}
+
+
+def _csv_name(text) -> str:
+    """Безпечний ASCII-фрагмент імені файлу (для Content-Disposition)."""
+    out = []
+    for ch in str(text or ''):
+        low = ch.lower()
+        if low in _CSV_TRANSLIT:
+            tr = _CSV_TRANSLIT[low]
+            out.append(tr.capitalize() if ch.isupper() else tr)
+        elif ch.isascii() and ch.isalnum():
+            out.append(ch)
+        else:
+            out.append('-')
+    slug = ''.join(out)
+    while '--' in slug:
+        slug = slug.replace('--', '-')
+    return slug.strip('-') or 'center'
+
+
 def _csv_response(rows: List[List], filename: str) -> Response:
     """CSV, який Excel відкриває без «кракозябр»: UTF-8 BOM + роздільник ';'."""
     buf = io.StringIO()
@@ -855,10 +883,9 @@ async def admin_cash_export(center_id: Optional[int] = None, month: Optional[str
             rows.append([
                 r.get('date'), r.get('title'), _csv_money(r.get('amount')),
                 _csv_money(r.get('balance')), r.get('category_name') or '',
-                r.get('comment') or '',
+                                r.get('comment') or '',
             ])
-        safe_name = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in name)
-        return _csv_response(rows, f"cash-{month}-{safe_name}.csv")
+        return _csv_response(rows, f"cash-{month}-{_csv_name(name)}.csv")
 
     # 2) Місяць по всіх ЦН
     if month:
