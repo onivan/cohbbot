@@ -54,7 +54,7 @@ function switchTab(tabId) {
     if (tabId === 'centers') loadCenters();
     if (tabId === 'categories') loadCategories();
     if (tabId === 'matrix') loadMatrix();
-    if (tabId === 'cash') loadCash();
+    if (tabId === 'cash') { loadCash(); loadCashYear(); }
     if (tabId === 'ai') loadAiModels();
 }
 
@@ -787,6 +787,7 @@ async function saveCashBatch() {
 async function openCashLedgerModal(centerId) {
     const month = cashMonth();
     const r = cashRow(centerId);
+    cashLedgerState = { centerId: centerId, month: month };
     const title = document.getElementById('cash-ledger-title');
     const summaryBox = document.getElementById('cash-ledger-summary');
     const tbody = document.querySelector('#cash-ledger-table tbody');
@@ -858,6 +859,243 @@ async function openCashLedgerModal(centerId) {
 
 function closeCashLedgerModal() {
     document.getElementById('cash-ledger-modal').style.display = 'none';
+}
+
+// ==========================================
+// J. КОШТИ ЦН — етап 4: річний огляд, закриття місяця, звірка, CSV
+// ==========================================
+let cashYearData = null;
+let cashLedgerState = { centerId: null, month: '' };
+
+function cashYearValue() {
+    const el = document.getElementById('cash-year');
+    if (el && !el.value) el.value = String(new Date().getFullYear());
+    return el ? el.value : String(new Date().getFullYear());
+}
+
+async function loadCashYear() {
+    const year = cashYearValue();
+    const tbody = document.querySelector('#cash-year-table tbody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#888;">Завантаження…</td></tr>';
+
+    const res = await fetchWithAuth(`/api/admin/cash/year?year=${encodeURIComponent(year)}`);
+    if (!res || !res.ok) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#f44336;">Не вдалося завантажити річний огляд</td></tr>';
+        return false;
+    }
+    const body = await res.json();
+    if (body.status !== 'ok') return false;
+    cashYearData = body.data;
+    renderCashYear();
+    return true;
+}
+
+function renderCashYear() {
+    const tbody = document.querySelector('#cash-year-table tbody');
+    if (!tbody || !cashYearData) return;
+    const d = cashYearData;
+    tbody.innerHTML = '';
+
+    (d.months || []).forEach(mo => {
+        const rows = mo.rows || [];
+        const t = mo.totals || {};
+        const closed = rows.filter(r => r.status === 'closed').length;
+        const open = rows.filter(r => r.status === 'open').length;
+        const mismatch = rows.filter(r => r.matches === false).length;
+
+        let state = '<span style="color:#888;">облік не почався</span>';
+        if (rows.length) {
+            state = [
+                closed ? `<span style="color:#607D8B;">закрито: ${closed}</span>` : '',
+                open ? `<span style="color:#2e7d32;">відкрито: ${open}</span>` : ''
+            ].filter(Boolean).join(' · ');
+            if (mismatch) {
+                state += ` <span title="Розрахунок не збігається зі знімком">⚠️ ${mismatch}</span>`;
+            }
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><b style="cursor:pointer;" title="Показати цей місяць у таблиці вище"
+                    onclick="pickCashMonth('${mo.month}')">${cashEsc(mo.month)}</b></td>
+            <td style="text-align:right; color:#2e7d32;">${cashMoney(t.received)}</td>
+            <td style="text-align:right; color:#c62828;">${cashMoney(t.spent)}</td>
+            <td style="text-align:right; font-weight:bold; ${Number(t.closing_balance) < 0 ? 'color:#f44336;' : ''}">${cashMoney(t.closing_balance)}</td>
+            <td>${state}</td>
+            <td>${rows.length
+                ? `<button type="button" class="btn-mini" onclick="toggleCashYearDetails('${mo.month}')">ЦН (${rows.length}) ▾</button>`
+                : '<span style="color:#888;">—</span>'}</td>
+        `;
+        tbody.appendChild(tr);
+
+        if (rows.length) {
+            const detail = document.createElement('tr');
+            detail.id = `cash-year-details-${mo.month}`;
+            detail.style.display = 'none';
+            const inner = rows.map(r => {
+                const negative = r.closing_balance !== null && r.closing_balance < 0;
+                const badge = r.status === 'closed'
+                    ? '<span style="color:#607D8B;">закритий</span>'
+                    : '<span style="color:#2e7d32;">відкритий</span>';
+                return `<tr>
+                    <td>${cashEsc(r.name)}</td>
+                    <td style="text-align:right;">${cashMoney(r.opening_balance)}</td>
+                    <td style="text-align:right; color:#2e7d32;">${cashMoney(r.received)}</td>
+                    <td style="text-align:right; color:#c62828;">${cashMoney(r.spent)}</td>
+                    <td style="text-align:right; ${negative ? 'color:#f44336; font-weight:bold;' : ''}">${cashMoney(r.closing_balance)}</td>
+                    <td>${r.configured ? badge : '<span style="color:#f44336;">немає обліку</span>'}
+                        ${r.matches === false ? ' ⚠️' : ''}</td>
+                </tr>`;
+            }).join('');
+            detail.innerHTML = `<td colspan="6" style="background:#fafafa;">
+                <table style="min-width:auto; font-size:13px;">
+                    <thead><tr>
+                        <th>ЦН</th><th>На початок</th><th>Надійшло</th><th>Витрачено</th><th>Залишок</th><th>Стан</th>
+                    </tr></thead>
+                    <tbody>${inner}</tbody>
+                </table>
+            </td>`;
+            tbody.appendChild(detail);
+        }
+    });
+
+    const line = document.getElementById('cash-year-summary');
+    if (line) {
+        const centers = d.centers || [];
+        const yearEnd = centers.reduce((acc, c) => acc + (Number(c.closing_balance) || 0), 0);
+        const totals = d.totals || {};
+        line.innerHTML = `За ${d.year} рік · Надійшло: ${cashMoney(totals.received)} · Витрачено: ${cashMoney(totals.spent)} · Залишок на кінець року: <b>${cashMoney(yearEnd)}</b> грн`;
+    }
+}
+
+function toggleCashYearDetails(month) {
+    const el = document.getElementById(`cash-year-details-${month}`);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function pickCashMonth(month) {
+    const el = document.getElementById('cash-month');
+    if (!el) return;
+    el.value = month;
+    loadCash();
+}
+
+// ---------- Звірка залишків ----------
+async function runCashReconcile() {
+    const month = cashMonth();
+    const box = document.getElementById('cash-reconcile-result');
+    if (box) box.innerHTML = '<span style="color:#888;">Перевіряю залишки…</span>';
+
+    const res = await fetchWithAuth(`/api/admin/cash/reconcile?month=${encodeURIComponent(month)}`);
+    if (!res || !res.ok) {
+        if (box) box.innerHTML = '<div style="padding:8px 12px; border-left:4px solid #f44336; background:#ffebee;">Не вдалося виконати звірку</div>';
+        return;
+    }
+    const body = await res.json();
+    if (body.status !== 'ok') return;
+    const d = body.data;
+    if (!box) return;
+
+    if (d.ok) {
+        box.innerHTML = `<div style="padding:8px 12px; border-left:4px solid #2e7d32; background:#e8f5e9;">
+            ✅ Звірка за ${cashEsc(d.month)}: залишки неперервні, розрахунок збігається зі знімками.</div>`;
+        return;
+    }
+    const items = (d.issues || []).map(i => `
+        <li>${cashEsc(i.center_name || ('ЦН #' + i.center_id))} · ${cashEsc(i.month)} — ${cashEsc(i.detail)}</li>`).join('');
+    box.innerHTML = `<div style="padding:8px 12px; border-left:4px solid #f44336; background:#ffebee;">
+        ⚠️ Звірка за ${cashEsc(d.month)}: знайдено розбіжностей — ${(d.issues || []).length}
+        <ul style="margin:6px 0 0 18px;">${items}</ul></div>`;
+}
+
+// ---------- Закриття / відкриття місяця ----------
+async function closeCashMonth() {
+    const month = cashMonth();
+    if (!confirm(`Закрити місяць ${month} для всіх ЦН? Залишки будуть зафіксовані знімками.`)) return;
+
+    const res = await fetchWithAuth('/api/admin/cash/close-month', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month })
+    });
+    if (!res) return;
+    if (!res.ok) {
+        alert(await cashApiError(res, 'Не вдалося закрити місяць'));
+        return;
+    }
+    const body = await res.json();
+    const d = body.data || {};
+    alert(`Місяць ${d.month || month} закрито: ЦН ${(d.closed || []).length}, зафіксовано рядків ${d.locked_rows || 0}.`
+        + ((d.skipped || []).length ? `\nПропущено ЦН (облік ще не почався): ${d.skipped.length}.` : ''));
+    await loadCash();
+    if (cashYearData) await loadCashYear();
+}
+
+async function reopenCashMonth() {
+    const month = cashMonth();
+    if (!confirm(`Відкрити місяць ${month} повторно? Фіксація залишків буде знята.`)) return;
+    const reason = prompt('Причина відкриття місяця (піде в аудит):', 'уточнення даних');
+    if (reason === null) return;
+
+    const res = await fetchWithAuth('/api/admin/cash/reopen-month', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, reason })
+    });
+    if (!res) return;
+    if (!res.ok) {
+        alert(await cashApiError(res, 'Не вдалося відкрити місяць'));
+        return;
+    }
+    const body = await res.json();
+    const d = body.data || {};
+    alert(`Місяць ${d.month || month}: знято фіксацію з ${d.reopened || 0} рядків.`);
+    await loadCash();
+    if (cashYearData) await loadCashYear();
+}
+
+// ---------- CSV ----------
+async function downloadCashCsv(scope) {
+    let url = '/api/admin/cash/export.csv';
+    let fallback = 'cash.csv';
+
+    if (scope === 'ledger') {
+        if (!cashLedgerState.centerId) return;
+        url += `?center_id=${cashLedgerState.centerId}&month=${encodeURIComponent(cashLedgerState.month || cashMonth())}`;
+        fallback = 'cash-ledger.csv';
+    } else if (scope === 'month') {
+        const month = cashMonth();
+        url += `?month=${encodeURIComponent(month)}`;
+        fallback = `cash-${month}.csv`;
+    } else {
+        const year = cashYearValue();
+        url += `?year=${encodeURIComponent(year)}`;
+        fallback = `cash-${year}.csv`;
+    }
+
+    try {
+        const res = await fetchWithAuth(url);
+        if (!res) return;
+        if (!res.ok) {
+            alert(await cashApiError(res, 'Не вдалося сформувати CSV'));
+            return;
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename="?([^";]+)"?/);
+        const name = match ? match[1] : fallback;
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(objectUrl); a.remove(); }, 1500);
+    } catch (e) {
+        console.error('CSV помилка:', e);
+        alert('Не вдалося завантажити CSV');
+    }
 }
 
 // ==========================================

@@ -161,6 +161,10 @@ receipts/            # Завантажені фото чеків (створю�
 `POST /api/admin/budgets`
 **Кошти ЦН (read-only):** `GET /api/cash/summary?center_id=&month=`, `GET /api/cash/ledger?center_id=&month=`
 (без `center_id` — власний ЦН; чужий ЦН → 403, адміну дозволено будь-який; операції — `/api/admin/cash/*`)
+**Кошти ЦН — звіти (адмін):** `GET /api/admin/cash/overview?month=`, `GET /api/admin/cash/ledger?center_id=&month=`,
+`POST /api/admin/cash/settings|operation|funding-batch`, `GET /api/admin/cash/year?year=`,
+`GET /api/admin/cash/reconcile?month=`, `POST /api/admin/cash/close-month|reopen-month`,
+`GET /api/admin/cash/export.csv?year=|month=|month=&center_id=` (UTF-8 BOM, `;`)
 **Адмін:** `GET /api/admin/users`, `PUT /api/admin/users/{id}/center`,
 `GET/POST /api/admin/categories`, `PUT /api/admin/categories/{id}`,
 `GET /api/admin/matrix`, `POST /api/admin/matrix/toggle`,

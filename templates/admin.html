@@ -122,16 +122,21 @@
     </div>
 
     <div id="cash" class="tab-content">
-        <p style="margin-bottom: 15px; font-weight: bold;">Реальні гроші ЦН: скільки видали, скільки витратили, що залишилось. Плани та ліміти — в розділі «Бюджет».</p>
+        <p style="margin-bottom: 15px; font-weight: bold;">Реальні гроші ЦН: скільки видали, скільки витратили, що залишилось. Плани та ліміти — в розділі «Бюджет». «Закрити місяць» фіксує залишки, «Звірка» перевіряє їх неперервність.</p>
 
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 15px;">
             <label style="font-weight: bold;">Місяць:</label>
             <input type="month" id="cash-month" onchange="loadCash()" style="padding: 6px;">
             <button type="button" style="background: #2196F3; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="loadCash()">Оновити</button>
-            <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openCashBatchModal()">+ Масова видача</button>
+                        <button type="button" style="background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openCashBatchModal()">+ Масова видача</button>
+            <button type="button" title="Журнал руху коштів обраного місяця по всіх ЦН у файлі CSV" style="background: #00897B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="downloadCashCsv('month')">CSV місяця</button>
+            <button type="button" title="Перевірити неперервність залишків і збіг зі знімками" style="background: #3F51B5; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="runCashReconcile()">Звірка</button>
+            <button type="button" title="Зафіксувати залишки всіх ЦН на кінець обраного місяця" style="background: #607D8B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashMonth()">Закрити місяць</button>
+            <button type="button" title="Зняти фіксацію місяця (причина піде в аудит)" style="background: #9E9E9E; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="reopenCashMonth()">Відкрити місяць</button>
             <span id="cash-summary-line" style="margin-left: auto; font-weight: bold;"></span>
         </div>
 
+        <div id="cash-reconcile-result" style="margin-bottom: 12px;"></div>
         <div id="cash-warnings" style="margin-bottom: 15px;"></div>
 
         <div style="overflow-x: auto;">
@@ -148,8 +153,35 @@
                         <th>Дії</th>
                     </tr>
                 </thead>
-                <tbody>
+                                <tbody>
                     <!-- Cash rows will be populated here -->
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="margin: 25px 0 10px 0;">Річний огляд (усі ЦН, 12 місяців)</h3>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+            <label style="font-weight: bold;">Рік:</label>
+            <input type="number" id="cash-year" min="2000" max="2100" step="1" style="padding: 6px; width: 100px;" onchange="loadCashYear()">
+            <button type="button" style="background: #2196F3; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="loadCashYear()">Показати</button>
+            <button type="button" title="Річний звіт (місяці × ЦН) у файлі CSV" style="background: #00897B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="downloadCashCsv('year')">CSV року</button>
+            <span id="cash-year-summary" style="margin-left: auto; font-weight: bold;"></span>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table id="cash-year-table" style="min-width: 900px;">
+                <thead>
+                    <tr>
+                        <th>Місяць</th>
+                        <th title="Видача мінус повернення ± коригування за місяць">Надійшло</th>
+                        <th title="Сума витрат ЦН за місяць">Витрачено</th>
+                        <th title="Залишок на кінець місяця (сума по ЦН)">Залишок</th>
+                        <th>Стан</th>
+                        <th>ЦН</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Year rows will be populated here -->
                 </tbody>
             </table>
         </div>
@@ -361,8 +393,9 @@
     <!-- Cash: журнал руху коштів -->
     <div id="cash-ledger-modal" class="modal">
         <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-actions-top">
+                        <div class="modal-actions-top">
                 <button type="button" style="background: #607D8B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="closeCashLedgerModal()">Закрити</button>
+                <button type="button" title="Журнал цього ЦН за місяць у файлі CSV" style="background: #00897B; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="downloadCashCsv('ledger')">Експорт CSV</button>
             </div>
             <h3 id="cash-ledger-title">Журнал руху коштів</h3>
             <div id="cash-ledger-summary" style="margin-bottom: 12px;"></div>

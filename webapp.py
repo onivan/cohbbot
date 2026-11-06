@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 import database
 import asyncio  
+import csv
+import io
 import os
 import uuid
 import logging
@@ -695,7 +697,7 @@ async def admin_cash_funding_batch(data: CashBatchFundingData,
     method = (data.method or 'cash').strip().lower()
     if method not in CASH_METHODS:
         raise HTTPException(status_code=400, detail="Спосіб має бути cash або bank")
-    result = await database.add_funding_batch(
+        result = await database.add_funding_batch(
         amounts, data.op_date, method=method,
         counterparty=(data.counterparty or '').strip() or None,
         comment=(data.comment or '').strip() or None,
@@ -704,3 +706,217 @@ async def admin_cash_funding_batch(data: CashBatchFundingData,
     for op in result['created']:
         await _cash_notify_after(op)
     return {"status": "ok", "data": result}
+
+
+# ==========================================
+# J. КОШТИ ЦН — ЗВІТИ (етап 4)
+# ==========================================
+# Річний огляд 20 ЦН × 12 місяців, закриття / відкриття місяця, звірка залишків, CSV.
+# Розрахунки живуть у database.py (агрегатні запити) — тут лише доступ і формат.
+
+class CashMonthActionData(BaseModel):
+    month: str
+    reason: Optional[str] = None
+
+
+CASH_STATUS_LABELS = {
+    'open': 'відкритий',
+    'closed': 'закритий',
+    'unconfigured': 'не налаштовано',
+    'not_started': 'облік ще не почався',
+}
+
+
+def _parse_year(year: Optional[int]) -> int:
+    year = int(year or datetime.now().year)
+    if year < 2000 or year > 2100:
+        raise HTTPException(status_code=400, detail="Рік має бути в межах 2000–2100")
+    return year
+
+
+def _require_month(month: Optional[str]) -> str:
+    if not month:
+        raise HTTPException(status_code=400, detail="Вкажіть місяць у форматі YYYY-MM")
+    _check_month(month)
+    return month
+
+
+def _csv_money(value) -> str:
+    """Число для Excel: десяткова кома, без роздільника тисяч."""
+    if value is None or value == '':
+        return ''
+    try:
+        return f"{float(value):.2f}".replace('.', ',')
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _csv_response(rows: List[List], filename: str) -> Response:
+    """CSV, який Excel відкриває без «кракозябр»: UTF-8 BOM + роздільник ';'."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=';', lineterminator='\r\n')
+    for row in rows:
+        writer.writerow(['' if v is None else v for v in row])
+    return Response(
+        content='\ufeff' + buf.getvalue(),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/admin/cash/year")
+async def admin_cash_year(year: Optional[int] = None,
+                          current_user: int = Depends(get_current_user)):
+    """Річний огляд коштів: 12 місяців × усі ЦН + підсумки за рік."""
+    _require_admin(current_user)
+    try:
+        data = await database.get_cash_overview(_parse_year(year))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "data": data}
+
+
+@app.get("/api/admin/cash/reconcile")
+async def admin_cash_reconcile(month: Optional[str] = None,
+                               current_user: int = Depends(get_current_user)):
+    """Звірка: неперервність ланцюжка залишків і збіг розрахунку зі знімками."""
+    _require_admin(current_user)
+    _check_month(month)
+    try:
+        data = await database.reconcile_month(month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    centers = await database.get_centers()
+    names = {c['id']: c['name'] for c in centers}
+    for issue in data.get('issues') or []:
+        issue['center_name'] = names.get(issue['center_id'], f"ЦН #{issue['center_id']}")
+    return {"status": "ok", "data": data}
+
+
+@app.post("/api/admin/cash/close-month")
+async def admin_cash_close_month(data: CashMonthActionData,
+                                 current_user: int = Depends(get_current_user)):
+    """Закриває місяць: залишки всіх ЦН фіксуються знімками (status='closed')."""
+    _require_admin(current_user)
+    month = _require_month(data.month)
+    if month > database.current_month():
+        raise HTTPException(status_code=400, detail="Не можна закрити майбутній місяць")
+    try:
+        result = await database.close_month(month, actor_id=current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "data": result}
+
+
+@app.post("/api/admin/cash/reopen-month")
+async def admin_cash_reopen_month(data: CashMonthActionData,
+                                  current_user: int = Depends(get_current_user)):
+    """Знімає фіксацію місяця (причина пишеться в cash_audit)."""
+    _require_admin(current_user)
+    month = _require_month(data.month)
+    try:
+        result = await database.reopen_month(
+            month, actor_id=current_user, reason=(data.reason or '').strip() or None
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "data": result}
+
+
+@app.get("/api/admin/cash/export.csv")
+async def admin_cash_export(center_id: Optional[int] = None, month: Optional[str] = None,
+                            year: Optional[int] = None,
+                            current_user: int = Depends(get_current_user)):
+    """CSV-звіт: журнал ЦН за місяць / місяць по всіх ЦН / рік по всіх ЦН."""
+    _require_admin(current_user)
+    centers = await database.get_centers()
+    names = {c['id']: c['name'] for c in centers}
+
+    # 1) Журнал одного ЦН за місяць
+    if center_id is not None and month:
+        _require_month(month)
+        data = await database.get_cash_ledger(center_id, month, limit=5000)
+        name = names.get(center_id, f"ЦН #{center_id}")
+        rows: List[List] = [['Журнал коштів ЦН'], ['ЦН', name], ['Місяць', month]]
+        summary = data.get('summary') or {}
+        if data.get('configured'):
+            rows += [
+                ['Облік з', summary.get('start_month') or ''],
+                ['На початок', _csv_money(summary.get('opening_balance'))],
+                ['Надійшло', _csv_money(summary.get('received'))],
+                ['Витрачено', _csv_money(summary.get('spent'))],
+                ['Залишок', _csv_money(summary.get('closing_balance'))],
+                ['Стан', CASH_STATUS_LABELS.get(summary.get('status'), summary.get('status') or '')],
+            ]
+        else:
+            rows.append(['Увага', 'Облік коштів для цього ЦН не налаштовано'])
+        rows += [[], ['Дата', 'Операція', 'Сума', 'Залишок', 'Стаття', 'Коментар']]
+        for r in data.get('rows') or []:
+            rows.append([
+                r.get('date'), r.get('title'), _csv_money(r.get('amount')),
+                _csv_money(r.get('balance')), r.get('category_name') or '',
+                r.get('comment') or '',
+            ])
+        safe_name = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in name)
+        return _csv_response(rows, f"cash-{month}-{safe_name}.csv")
+
+    # 2) Місяць по всіх ЦН
+    if month:
+        month = _require_month(month)
+        table = await database.get_cash_admin_table(month)
+        totals = table.get('totals') or {}
+        rows = [
+            ['Кошти ЦН за місяць'], ['Місяць', month],
+            ['Надійшло', _csv_money(totals.get('received'))],
+            ['Витрачено', _csv_money(totals.get('spent'))],
+            ['Залишок', _csv_money(totals.get('closing_balance'))],
+            [], ['ЦН', 'Місто', 'Облік з', 'На початок', 'Надійшло', 'Витрачено', 'Залишок', 'Стан'],
+        ]
+        for r in table.get('rows') or []:
+            status = CASH_STATUS_LABELS.get(r.get('status'), r.get('status') or '')
+            if r.get('matches') is False:
+                status += ' (розбіжність зі знімком)'
+            rows.append([
+                r.get('name'), r.get('city') or '', r.get('start_month') or '',
+                _csv_money(r.get('month_opening')), _csv_money(r.get('received')),
+                _csv_money(r.get('spent')), _csv_money(r.get('closing_balance')), status,
+            ])
+        if table.get('negative'):
+            rows += [[], ['Мінусовий залишок']]
+            for n in table['negative']:
+                rows.append([n.get('name'), _csv_money(n.get('closing_balance'))])
+        return _csv_response(rows, f"cash-{month}.csv")
+
+    # 3) Рік по всіх ЦН
+    year = _parse_year(year)
+    overview = await database.get_cash_overview(year)
+    city_of = {c['id']: (c.get('city') or '') for c in overview.get('centers') or []}
+    totals = overview.get('totals') or {}
+    rows = [
+        ['Звіт про кошти ЦН за рік'], ['Рік', year],
+        ['Надійшло за рік', _csv_money(totals.get('received'))],
+        ['Витрачено за рік', _csv_money(totals.get('spent'))],
+        [], ['Місяць', 'ЦН', 'Місто', 'Облік з', 'На початок', 'Надійшло', 'Витрачено', 'Залишок', 'Стан'],
+    ]
+    for month_data in overview.get('months') or []:
+        for r in month_data.get('rows') or []:
+            status = CASH_STATUS_LABELS.get(r.get('status'), r.get('status') or '')
+            if r.get('matches') is False:
+                status += ' (розбіжність зі знімком)'
+            rows.append([
+                month_data.get('month'), r.get('name'), city_of.get(r.get('center_id'), ''),
+                r.get('start_month') or '', _csv_money(r.get('opening_balance')),
+                _csv_money(r.get('received')), _csv_money(r.get('spent')),
+                _csv_money(r.get('closing_balance')), status,
+            ])
+    rows += [[], ['Підсумки по ЦН за рік'],
+             ['ЦН', 'Місто', 'Облік з', 'Надійшло', 'Витрачено', 'Залишок на кінець року']]
+    for c in overview.get('centers') or []:
+        if not c.get('configured'):
+            continue
+        rows.append([
+            c.get('name'), c.get('city') or '', c.get('start_month') or '',
+            _csv_money(c.get('received')), _csv_money(c.get('spent')),
+            _csv_money(c.get('closing_balance')),
+        ])
+    return _csv_response(rows, f"cash-{year}.csv")
