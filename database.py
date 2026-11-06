@@ -1174,10 +1174,10 @@ async def get_cash_ledger(center_id: int, month: str = None, limit: int = 300):
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             summary = await _cash_compute(cur, center_id, month)
-                        if not summary:
-                            return {'configured': False, 'center_id': center_id, 'month': month,
-                                    'rows': [], 'summary': None}
-                        snapshot = await _cash_snapshot_cur(cur, center_id, month)
+            if not summary:
+                return {'configured': False, 'center_id': center_id, 'month': month,
+                    'rows': [], 'summary': None}
+            snapshot = await _cash_snapshot_cur(cur, center_id, month)
             await cur.execute(
                 """SELECT * FROM (
                        SELECT o.op_date       AS d,

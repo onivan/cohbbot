@@ -865,7 +865,7 @@ async def admin_cash_export(center_id: Optional[int] = None, month: Optional[str
         _require_month(month)
         data = await database.get_cash_ledger(center_id, month, limit=5000)
         name = names.get(center_id, f"ЦН #{center_id}")
-                rows: List[List] = [['Журнал коштів ЦН'], ['ЦН', name], ['Місяць', month]]
+        rows: List[List] = [['Журнал коштів ЦН'], ['ЦН', name], ['Місяць', month]]
         summary = data.get('summary') or {}
         if data.get('configured'):
             st = data.get('status') or 'open'
