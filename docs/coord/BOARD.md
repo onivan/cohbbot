@@ -6,13 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: ініціалізація протоколу; лок вільний
-
+- state: BUSY
+- owner: ws-windows
+- task: J2
+- branch: feat/j2-user-cash
+- since: 2026-11-06T08:14:00Z
+- note: вкладка «💰 Кошти» read-only для ЦН + «📊 Бюджет» → «📊 Ліміти»; дослідження коду
 ---
 
 ## Журнал передач
@@ -23,3 +22,4 @@
 - Ручні кроки людини: на кожній машині створити `.workstation` відповідно до її ID
   (`echo ws-a > .workstation` та `echo ws-b > .workstation`).
 - Наступний крок: визначити першу задачу (рекомендовано J2 — вкладка «💰 Кошти», read-only).
+
