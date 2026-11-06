@@ -1223,7 +1223,7 @@ async def get_cash_ledger(center_id: int, month: str = None, limit: int = 300):
             'balance': balance,
             'ref_id': r['ref_id'],
         })
-        return {
+    return {
         'configured': True,
         'center_id': center_id,
         'month': month,
