@@ -1174,9 +1174,10 @@ async def get_cash_ledger(center_id: int, month: str = None, limit: int = 300):
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             summary = await _cash_compute(cur, center_id, month)
-            if not summary:
-                return {'configured': False, 'center_id': center_id, 'month': month,
-                        'rows': [], 'summary': None}
+                        if not summary:
+                            return {'configured': False, 'center_id': center_id, 'month': month,
+                                    'rows': [], 'summary': None}
+                        snapshot = await _cash_snapshot_cur(cur, center_id, month)
             await cur.execute(
                 """SELECT * FROM (
                        SELECT o.op_date       AS d,
@@ -1222,13 +1223,20 @@ async def get_cash_ledger(center_id: int, month: str = None, limit: int = 300):
             'balance': balance,
             'ref_id': r['ref_id'],
         })
-    return {
+        return {
         'configured': True,
         'center_id': center_id,
         'month': month,
         'summary': summary,
         'rows': rows,
         'truncated': len(rows) >= int(limit),
+        # Стан місяця: як у get_cash_summary (журнал не дублює цю логіку на клієнті)
+        'status': (snapshot or {}).get('status', 'open'),
+        'matches': None if not snapshot else (
+            abs(snapshot['closing_balance'] - summary['closing_balance']) < 0.01
+            and abs(snapshot['spent'] - summary['spent']) < 0.01
+        ),
+        'snapshot': snapshot,
     }
 
 

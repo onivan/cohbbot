@@ -866,15 +866,19 @@ async def admin_cash_export(center_id: Optional[int] = None, month: Optional[str
         data = await database.get_cash_ledger(center_id, month, limit=5000)
         name = names.get(center_id, f"ЦН #{center_id}")
         rows: List[List] = [['Журнал коштів ЦН'], ['ЦН', name], ['Місяць', month]]
-        summary = data.get('summary') or {}
+                summary = data.get('summary') or {}
         if data.get('configured'):
+            st = data.get('status') or 'open'
+            st_text = CASH_STATUS_LABELS.get(st, st)
+            if data.get('matches') is False:
+                st_text += ' (розбіжність зі знімком)'
             rows += [
                 ['Облік з', summary.get('start_month') or ''],
                 ['На початок', _csv_money(summary.get('opening_balance'))],
                 ['Надійшло', _csv_money(summary.get('received'))],
                 ['Витрачено', _csv_money(summary.get('spent'))],
                 ['Залишок', _csv_money(summary.get('closing_balance'))],
-                ['Стан', CASH_STATUS_LABELS.get(summary.get('status'), summary.get('status') or '')],
+                ['Стан', st_text],
             ]
         else:
             rows.append(['Увага', 'Облік коштів для цього ЦН не налаштовано'])
