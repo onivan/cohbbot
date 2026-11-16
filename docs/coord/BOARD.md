@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-windows
-- task: J5
-- branch: dev
-- since: 2026-11-16T13:50:29Z
-- note: зафіксувати результати успішних staging-тестів і завершити J5
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 ---
 
 ## Журнал передач
@@ -53,5 +53,13 @@
 - Ручні кроки: інтегрувати `feat/j5-balance` у `dev`, задеплоїти staging і виконати `make test`;
   якщо тест виявить проблеми — виправити до оголошення J5 завершеною.
 - Наступний крок: ACTIVE-агент інтегрує гілку в `dev` і запускає тести на staging.
+
+### 2026-11-16 · J5 · перевірено на staging · ws-windows
+- Інтегровано у `dev`: merge-коміт `b3b4d70`; задеплоєно у `/home/onivan/cohbbot-dev`, `expensebot-dev.service` активний;
+  VPS HEAD збігається з `b3b4d70`.
+- Тести на VPS: `test_cash.py` PASS 49 / FAIL 0 / SKIP 0;
+  `test_centers_own.py` PASS 33 / FAIL 0 / KNOWN 1 — відома проблема H1 (доступ до бюджетів чужого ЦН).
+- TODO оновлено: J.5 завершено. Ручних кроків/міграцій немає. `dev` задеплоєна на staging.
+- Наступний крок: вибрати й захопити наступну відкриту задачу з TODO; H1 лишається відомим ризиком.
 
 
