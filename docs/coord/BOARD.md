@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: J5
+- branch: dev
+- since: 2026-11-16T13:50:29Z
+- note: зафіксувати результати успішних staging-тестів і завершити J5
 ---
 
 ## Журнал передач
