@@ -8,10 +8,10 @@
 
 - state: BUSY
 - owner: ws-windows
-- task: J4
-- branch: feat/j4-cash-reports
-- since: 2026-11-06T10:30:00Z
-- note: річний огляд ЦН, закриття місяця, звірка, CSV
+- task: J5
+- branch: feat/j5-balance
+- since: 2026-11-16T12:58:59Z
+- note: команда /balance у боті та тест інваріантів коштів у make test
 ---
 
 ## Журнал передач
