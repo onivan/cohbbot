@@ -69,11 +69,13 @@ webapp.py            # FastAPI: усі HTTP-ендпоінти, auth, шабло
 schema.sql           # DDL усіх таблиць + початкові категорії
 requirements.txt     # Залежності
 instruction.md       # Текст інструкції для користувачів (виводиться ботом)
+test_cash.py         # Перевірки інваріантів розрахунку коштів ЦН
 TODO.md              # План розробки (SSOT для задач)
 PROJECT_OVERVIEW.md  # ← цей файл
 
 handlers/
   registration.py    # /start, реєстрація (ім'я→місто), /login (код для веб)
+  cash.py            # /balance — залишок коштів власного ЦН за поточний місяць
   receipts.py        # Обробка фото чека, render_summary(), збереження файлу
   receipt_callbacks.py # Кнопки картки: зберегти / скасувати / вибір категорії
   settings.py        # /settings — зміна назви центру (ЗАСТАРІЛЕ, див. §11)

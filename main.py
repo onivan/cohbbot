@@ -10,6 +10,7 @@ from handlers.settings import router as settings_router
 from handlers.instructions import router as instructions_router
 from handlers.receipts import router as receipts_router
 from handlers.receipt_callbacks import router as callbacks_router
+from handlers.cash import router as cash_router
 from webapp import app        # Імпортуємо наш FastAPI додаток
 from config import PORT
 
@@ -19,6 +20,8 @@ dp.include_router(settings_router)
 dp.include_router(instructions_router)
 dp.include_router(receipts_router)
 dp.include_router(callbacks_router)
+dp.include_router(cash_router)
+
 
 async def start_uvicorn():
     # Налаштовуємо Uvicorn програмно
