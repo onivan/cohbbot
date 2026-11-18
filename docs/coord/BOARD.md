@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: TODO уточнення B4/A3
+- branch: dev
+- since: 2026-11-18T12:21:41Z
+- note: внести вимоги щодо попапу чека й запиту суми в TODO, закомітити та передати
 ---
 
 ## Журнал передач
