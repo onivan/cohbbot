@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: TODO update (A3/A4/B4/K1)
+- branch: dev
+- since: 2026-11-18T06:24:22Z
+- note: внести узгоджений функціонал у TODO.md і зафіксувати оновлення борду
 ---
 
 ## Журнал передач
