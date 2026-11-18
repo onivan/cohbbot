@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: TODO уточнення B4/A3
+- branch: dev
+- since: 2026-11-18T12:31:53Z
+- note: реалізувати попап чека в журналі B4 і Telegram-запит суми для відхиленого чека A3
 ---
 
 ## Журнал передач
