@@ -9,7 +9,8 @@ import logging
 
 from bot_setup import bot
 from config import CASH_NOTIFY
-from database import users_cache, get_centers
+from database import users_cache, get_centers, create_admin_notification
+
 
 _bg_tasks = set()
 
@@ -70,14 +71,47 @@ async def _send_many(user_ids, text: str) -> int:
 
 
 def _spawn(coro):
-    if not CASH_NOTIFY:
-        return
     task = asyncio.create_task(coro)
+
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
 
 
+async def _persist_cash_operation(center_id: int, op: dict, closing) -> None:
+    try:
+        center_name = await _center_name(center_id)
+        label = {'funding': 'Надходження коштів', 'return': 'Повернення коштів',
+                 'adjustment': 'Коригування коштів'}.get(op.get('kind'), 'Рух коштів')
+        signed = float(op.get('signed_amount') or 0)
+        message = f"ЦН «{center_name}» · {op.get('op_date') or op.get('month') or ''} · сума {_money(signed)} грн"
+        if op.get('comment'):
+            message += f" · {op['comment']}"
+        if closing is not None:
+            message += f" · залишок {_money(closing)} грн"
+        await create_admin_notification(
+            type='cash_operation', title=label, message=message, center_id=center_id,
+            payload={'operation_id': op.get('id'), 'kind': op.get('kind'),
+                     'signed_amount': signed, 'month': op.get('month')}
+        )
+    except Exception as e:
+        logging.error(f"cash_notify: не вдалося записати операцію в журнал: {e}")
+
+
+async def _persist_negative_balance(center_id: int, op: dict, closing) -> None:
+    try:
+        center_name = await _center_name(center_id)
+        await create_admin_notification(
+            type='negative_balance', title='Мінусовий залишок коштів',
+            message=f"ЦН «{center_name}», місяць {op.get('month')}: {_money(closing)} грн",
+            center_id=center_id,
+            payload={'operation_id': op.get('id'), 'closing_balance': float(closing), 'month': op.get('month')}
+        )
+    except Exception as e:
+        logging.error(f"cash_notify: не вдалося записати мінусовий залишок: {e}")
+
+
 async def _notify_center(center_id: int, op: dict, closing) -> None:
+
     recipients = _center_user_ids(center_id)
     if not recipients:
         return
@@ -115,16 +149,21 @@ def after_operation(op: dict, summary: dict) -> None:
     op      — результат database.add_cash_operation()
     summary — database.get_cash_summary() за місяцем операції (після перерахунку)
     """
-    if not CASH_NOTIFY:
-        return
     closing = None
+
     if summary and summary.get('configured'):
         closing = summary.get('closing_balance')
 
-    _spawn(_notify_center(op['center_id'], op, closing))
+    # Журнал у БД ведеться незалежно від Telegram-сповіщень.
+    _spawn(_persist_cash_operation(op['center_id'], op, closing))
+    if CASH_NOTIFY:
+        _spawn(_notify_center(op['center_id'], op, closing))
 
     # Мінусовий залишок — тільки момент переходу в мінус, щоб не спамити
     if closing is not None and closing < 0:
         before = float(closing) - float(op.get('signed_amount') or 0)
         if before >= 0:
-            _spawn(_notify_negative(op['center_id'], op, closing))
+            _spawn(_persist_negative_balance(op['center_id'], op, closing))
+            if CASH_NOTIFY:
+                _spawn(_notify_negative(op['center_id'], op, closing))
+

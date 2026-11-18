@@ -175,7 +175,27 @@ CREATE TABLE IF NOT EXISTS `cash_audit` (
     INDEX `idx_audit_month` (`month`, `center_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 13. Адмінські сповіщення
+CREATE TABLE IF NOT EXISTS `admin_notifications` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `type` VARCHAR(64) NOT NULL COMMENT 'invalid_receipt/cash_operation/negative_balance',
+    `title` VARCHAR(191) NOT NULL,
+    `message` TEXT NOT NULL,
+    `center_id` INT NULL,
+    `user_id` BIGINT NULL,
+    `receipt_path` TEXT NULL,
+    `payload` TEXT NULL,
+    `status` ENUM('open','resolved') NOT NULL DEFAULT 'open',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `resolved_at` DATETIME NULL,
+    `resolved_by` BIGINT NULL,
+    INDEX `idx_admin_notifications_status_date` (`status`, `created_at`),
+    INDEX `idx_admin_notifications_type_date` (`type`, `created_at`),
+    INDEX `idx_admin_notifications_center` (`center_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Базові початкові категорії
+
 INSERT IGNORE INTO `categories` (`id`, `name`, `sort_order`, `is_active`) VALUES
 ('cat_food', 'Продукти', 1, 1),
 ('cat_cafe', 'Кафе/Ресторани', 2, 1),

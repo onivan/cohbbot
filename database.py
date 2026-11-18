@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 import re
 import uuid
 import time
@@ -1832,4 +1833,110 @@ async def add_funding_batch(amounts_by_center: dict, op_date, method: str = 'cas
         'errors': errors,
         'total': _r2(sum(c['amount'] for c in created)),
     }
+
+
+# ---------- Адмінські сповіщення ----------
+
+async def ensure_notifications_schema():
+    """Ідемпотентна схема журналу сповіщень та адміністрування."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS `admin_notifications` (
+                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    `type` VARCHAR(64) NOT NULL,
+                    `title` VARCHAR(191) NOT NULL,
+                    `message` TEXT NOT NULL,
+                    `center_id` INT NULL,
+                    `user_id` BIGINT NULL,
+                    `receipt_path` TEXT NULL,
+                    `payload` TEXT NULL,
+                    `status` ENUM('open','resolved') NOT NULL DEFAULT 'open',
+                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `resolved_at` DATETIME NULL,
+                    `resolved_by` BIGINT NULL,
+                    INDEX `idx_admin_notifications_status_date` (`status`, `created_at`),
+                    INDEX `idx_admin_notifications_type_date` (`type`, `created_at`),
+                    INDEX `idx_admin_notifications_center` (`center_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+
+
+async def create_admin_notification(type: str, title: str, message: str,
+                                   center_id: int = None, user_id: int = None,
+                                   receipt_path: str = None, payload: dict = None):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO admin_notifications
+                       (type, title, message, center_id, user_id, receipt_path, payload)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (type, title, message, center_id, user_id, receipt_path,
+                 json.dumps(payload or {}, ensure_ascii=False))
+            )
+            return cur.lastrowid
+
+
+async def list_admin_notifications(status: str = None, type: str = None,
+                                  center_id: int = None, date_from: str = None,
+                                  date_to: str = None, limit: int = 200):
+    pool = await get_pool()
+    conditions, params = [], []
+    if status in ('open', 'resolved'):
+        conditions.append("n.status = %s")
+        params.append(status)
+    if type:
+        conditions.append("n.type = %s")
+        params.append(type)
+    if center_id:
+        conditions.append("n.center_id = %s")
+        params.append(center_id)
+    if date_from:
+        conditions.append("n.created_at >= %s")
+        params.append(f"{date_from} 00:00:00")
+    if date_to:
+        conditions.append("n.created_at < DATE_ADD(%s, INTERVAL 1 DAY)")
+        params.append(date_to)
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    params.append(max(1, min(int(limit), 500)))
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                f"""SELECT n.*, c.name AS center_name, u.name AS user_name
+                    FROM admin_notifications n
+                    LEFT JOIN centers c ON c.id = n.center_id
+                    LEFT JOIN users u ON u.telegram_id = n.user_id
+                    {where}
+                    ORDER BY n.created_at DESC, n.id DESC LIMIT %s""",
+                tuple(params)
+            )
+            rows = await cur.fetchall() or []
+    for row in rows:
+        try:
+            row['payload'] = json.loads(row.get('payload') or '{}')
+        except (TypeError, ValueError):
+            row['payload'] = {}
+        for key in ('created_at', 'resolved_at'):
+            if row.get(key):
+                row[key] = str(row[key])
+    return rows
+
+
+async def set_admin_notification_status(notification_id: int, status: str, actor_id: int):
+    if status not in ('open', 'resolved'):
+        raise ValueError('Невідомий статус сповіщення')
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE admin_notifications
+                   SET status = %s,
+                       resolved_at = IF(%s = 'resolved', NOW(), NULL),
+                       resolved_by = IF(%s = 'resolved', %s, NULL)
+                   WHERE id = %s""",
+                (status, status, status, actor_id, notification_id)
+            )
+            return cur.rowcount > 0
 

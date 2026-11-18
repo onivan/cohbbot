@@ -48,6 +48,8 @@
         <button class="tab-btn" onclick="switchTab('matrix')">Матриця ЦН-Категорії</button>
         <button class="tab-btn" onclick="switchTab('cash')">Кошти</button>
         <button class="tab-btn" onclick="switchTab('ai')">ШІ-моделі</button>
+        <button class="tab-btn" onclick="switchTab('notifications')">Сповіщення</button>
+
     </div>
 
     <div id="users" class="tab-content active">
@@ -187,7 +189,31 @@
         </div>
     </div>
 
+        <div id="notifications" class="tab-content">
+        <p style="font-weight: bold;">Журнал подій, що потребують уваги адміністратора.</p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:15px;">
+            <select id="notification-status" onchange="loadNotifications()" style="padding:7px;">
+                <option value="">Усі стани</option><option value="open">Відкриті</option><option value="resolved">Опрацьовані</option>
+            </select>
+            <select id="notification-type" onchange="loadNotifications()" style="padding:7px;">
+                <option value="">Усі типи</option><option value="invalid_receipt">Невалідний чек</option>
+                <option value="cash_operation">Операція з коштами</option><option value="negative_balance">Мінусовий баланс</option>
+            </select>
+            <select id="notification-center" onchange="loadNotifications()" style="padding:7px;"><option value="">Усі ЦН</option></select>
+            <label>Від <input type="date" id="notification-from" onchange="loadNotifications()"></label>
+            <label>До <input type="date" id="notification-to" onchange="loadNotifications()"></label>
+            <button type="button" onclick="loadNotifications()">Оновити</button>
+        </div>
+        <div style="overflow-x:auto;">
+            <table id="notifications-table" style="min-width:850px;">
+                <thead><tr><th>Дата</th><th>Тип / повідомлення</th><th>ЦН</th><th>Користувач</th><th>Дії</th></tr></thead>
+                <tbody><tr><td colspan="5">Оберіть фільтри або оновіть журнал</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
     <div id="ai" class="tab-content">
+
         <p style="margin-bottom: 15px; font-weight: bold;">Активна модель використовується для розпізнавання чеків. API-ключі зберігаються в базі даних.</p>
         <button style="margin-bottom: 15px; background: #4CAF50; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;" onclick="openAiModal()">+ Додати модель</button>
         <div style="overflow-x: auto;">

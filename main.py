@@ -40,13 +40,20 @@ async def main():
     except Exception as e:
         logging.error(f"Не вдалося ініціалізувати схему AI: {e}")
 
-    # 0.1 Таблиці обліку коштів ЦН (каса) — також ідемпотентно
+        # 0.1 Таблиці обліку коштів ЦН (каса) — також ідемпотентно
     try:
         await database.ensure_cash_schema()
     except Exception as e:
         logging.error(f"Не вдалося ініціалізувати схему коштів: {e}")
 
+    # 0.2 Збережені сповіщення для адмін-панелі
+    try:
+        await database.ensure_notifications_schema()
+    except Exception as e:
+        logging.error(f"Не вдалося ініціалізувати схему сповіщень: {e}")
+
     # 1. Завантажуємо користувачів із MySQL
+
     await database.load_users()
     
     # Запускаємо одночасно FastAPI (uvicorn) та Telegram Polling

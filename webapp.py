@@ -224,6 +224,41 @@ async def admin_page(request: Request):
     )
     return response
 
+@app.get("/api/admin/notifications")
+async def admin_get_notifications(status: Optional[str] = None, type: Optional[str] = None,
+                                  center_id: Optional[int] = None,
+                                  date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                  current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    for value in (date_from, date_to):
+        if value:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Дата має бути у форматі YYYY-MM-DD")
+    data = await database.list_admin_notifications(
+        status=status, type=type, center_id=center_id,
+        date_from=date_from, date_to=date_to
+    )
+    return {"status": "ok", "data": data}
+
+
+class AdminNotificationStatusData(BaseModel):
+    status: str
+
+
+@app.put("/api/admin/notifications/{notification_id}")
+async def admin_update_notification(notification_id: int, data: AdminNotificationStatusData,
+                                    current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    if data.status not in ("open", "resolved"):
+        raise HTTPException(status_code=400, detail="Статус має бути open або resolved")
+    updated = await database.set_admin_notification_status(notification_id, data.status, current_user)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Сповіщення не знайдено")
+    return {"status": "ok"}
+
+
 @app.get("/api/admin/users")
 async def admin_get_users(current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):

@@ -56,6 +56,8 @@ function switchTab(tabId) {
     if (tabId === 'matrix') loadMatrix();
     if (tabId === 'cash') { loadCash(); loadCashYear(); }
     if (tabId === 'ai') loadAiModels();
+    if (tabId === 'notifications') loadNotifications();
+
 }
 
 let allCenters = [];
@@ -66,8 +68,15 @@ async function loadCenters() {
 
     const data = await res.json();
     if (data.status === 'ok') {
-        allCenters = data.data;
+                allCenters = data.data;
+        const notificationCenter = document.getElementById('notification-center');
+        if (notificationCenter) {
+            const selected = notificationCenter.value;
+            notificationCenter.innerHTML = '<option value="">Усі ЦН</option>' + data.data.map(c => `<option value="${c.id}">${cashEsc(c.name)}</option>`).join('');
+            notificationCenter.value = selected;
+        }
         const tbody = document.querySelector('#centers-table tbody');
+
         if (tbody) {
             tbody.innerHTML = '';
             data.data.forEach(c => {
@@ -349,7 +358,61 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 }
 
 // ==========================================
+// ЖУРНАЛ АДМІНСЬКИХ СПОВІЩЕНЬ
+// ==========================================
+async function loadNotifications() {
+    const params = new URLSearchParams();
+    const fields = {
+        status: 'notification-status', type: 'notification-type',
+        center_id: 'notification-center', date_from: 'notification-from', date_to: 'notification-to'
+    };
+    Object.entries(fields).forEach(([key, id]) => {
+        const value = document.getElementById(id)?.value;
+        if (value) params.set(key, value);
+    });
+    const tbody = document.querySelector('#notifications-table tbody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5">Завантаження…</td></tr>';
+    const res = await fetchWithAuth(`/api/admin/notifications?${params.toString()}`);
+    if (!res || !res.ok) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5">Не вдалося завантажити сповіщення</td></tr>';
+        return;
+    }
+    const body = await res.json();
+    const rows = body.data || [];
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">Сповіщень немає</td></tr>';
+        return;
+    }
+    rows.forEach(n => {
+        const tr = document.createElement('tr');
+        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс'})[n.type] || n.type;
+        const receipt = n.receipt_path ? `<a href="${cashEsc(n.receipt_path)}" target="_blank" rel="noopener">Переглянути чек</a>` : '';
+        const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
+        const actions = [receipt, chat, n.status === 'open'
+            ? `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'resolved')">Опрацьовано</button>`
+            : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
+        tr.innerHTML = `<td style="white-space:nowrap;">${cashEsc(n.created_at || '')}</td>
+            <td><b>${cashEsc(typeLabel)}: ${cashEsc(n.title)}</b><div style="white-space:pre-wrap;font-size:12px;margin-top:4px;">${cashEsc(n.message)}</div>
+            <div style="font-size:11px;color:#888;">${n.status === 'open' ? 'Відкрите' : 'Опрацьоване'}</div></td>
+            <td>${cashEsc(n.center_name || '—')}</td><td>${cashEsc(n.user_name || n.user_id || '—')}</td><td>${actions}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+async function setNotificationStatus(id, status) {
+    const res = await fetchWithAuth(`/api/admin/notifications/${id}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({status})
+    });
+    if (res && res.ok) loadNotifications();
+    else if (res) alert('Не вдалося оновити сповіщення');
+}
+
+// ==========================================
 // ШІ-МОДЕЛІ (OPENROUTER)
+
 // ==========================================
 let allAiModels = [];
 

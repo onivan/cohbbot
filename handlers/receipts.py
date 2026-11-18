@@ -16,8 +16,9 @@ from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
-    get_all_users, get_active_ai_model,
+    get_all_users, get_active_ai_model, create_admin_notification,
 )
+
 from ai_service import parse_receipt_image, AIServiceError
 from handlers.states import ReceiptState
 
@@ -202,12 +203,35 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 )
             )
         
-        # A1. Валідація «це чек?»: якщо AI визначив, що це не фіскальний чек
+                # A1. Валідація «це чек?»: якщо AI визначив, що це не фіскальний чек
         if not data.get('is_receipt', True):
+
+
             doc_type = (data.get('document_type') or 'невідомий документ').strip()
+            user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
+            center_id = user_info.get('center_id')
+            receipt_path = None
+            try:
+                now = datetime.now()
+                folder_path = f"receipts/{user_id}/{now:%Y/%m}"
+                await asyncio.to_thread(os.makedirs, folder_path, exist_ok=True)
+                file_name = f"{now:%Y-%m-%d_%H-%M-%S}_invalid-{uuid.uuid4().hex[:6]}.jpg"
+                local_path = f"{folder_path}/{file_name}"
+                await asyncio.to_thread(image.convert('RGB').save, local_path, 'JPEG', quality=90)
+                receipt_path = f"{WEBAPP_URL}/{local_path}"
+            except Exception as e:
+                logging.error(f"Не вдалося зберегти невалідний документ: {e}")
+            await create_admin_notification(
+                type='invalid_receipt', title='Спроба надіслати невалідний чек',
+                message=f"Користувач: {user_info.get('name', 'Невідомо')} ({user_id})\nЦН: {user_info.get('center', '—')}\nТип документа: {doc_type}",
+                center_id=int(center_id) if center_id else None, user_id=user_id,
+                receipt_path=receipt_path,
+                payload={'document_type': doc_type, 'source': 'telegram'}
+            )
             await msg.edit_text(
                 "❌ Це не схоже на фіскальний чек.\n"
                 f"Розпізнано як: {doc_type}.\n\n"
+
                 "Будь ласка, надішліть фото саме фіскального чека."
             )
             # Сповіщаємо адмінів із фото цього документа
