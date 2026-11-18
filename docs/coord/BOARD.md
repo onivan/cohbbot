@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: B4 notifications inbox
+- branch: dev
+- since: 2026-11-18T08:57:34Z
+- note: реалізувати перший повний зріз сторінки сповіщень адмінки з БД/API/UI та тестами
 ---
 
 ## Журнал передач
