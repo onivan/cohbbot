@@ -5,7 +5,11 @@ import logging
 import urllib.parse
 import uuid
 import traceback
+import math
+import re
 from datetime import datetime
+
+
 from PIL import Image
 
 from aiogram import Router, types, F
@@ -16,8 +20,9 @@ from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
-    get_active_ai_model, create_admin_notification,
+    get_active_ai_model, create_admin_notification, set_invalid_receipt_amount,
 )
+
 from telegram_notifications import notify_admins
 
 from ai_service import parse_receipt_image, AIServiceError
@@ -108,8 +113,16 @@ async def render_summary(message_obj: types.Message, data: dict, state: FSMConte
 @router.message(F.photo)
 async def process_receipt_photo(message: types.Message, state: FSMContext):
     """Обробка фото чека: розпізнавання, збереження та підготовка до підтвердження"""
+
+    if await state.get_state() == ReceiptState.waiting_for_invalid_receipt_amount.state:
+        await message.answer("Спочатку надішліть суму витрати або скасуйте запит кнопкою під повідомленням.")
+        return
+
     user_id = message.from_user.id
+
+
     user_id_str = str(user_id)
+
     
     if user_id_str not in users_cache:
         await load_users()
@@ -195,11 +208,11 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 )
             )
         
-                # A1. Валідація «це чек?»: якщо AI визначив, що це не фіскальний чек
+                        
+                
+        # Перевіряємо, чи AI визначив документ як чек.
 
         if not data.get('is_receipt', True):
-
-
             doc_type = (data.get('document_type') or 'невідомий документ').strip()
             user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
             center_id = user_info.get('center_id')
@@ -214,47 +227,73 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 receipt_path = f"{WEBAPP_URL}/{local_path}"
             except Exception as e:
                 logging.error(f"Не вдалося зберегти невалідний документ: {e}")
+
+            try:
+                parsed_amount = float(str(data.get('amount') or '').replace(',', '.'))
+                receipt_amount = round(parsed_amount, 2) if math.isfinite(parsed_amount) and parsed_amount > 0 else None
+            except (TypeError, ValueError):
+                receipt_amount = None
+
             notification_id = await create_admin_notification(
-                type='invalid_receipt', title='Спроба надіслати невалідний чек',
-                message=f"Користувач: {user_info.get('name', 'Невідомо')} ({user_id})\nЦН: {user_info.get('center', '—')}\nТип документа: {doc_type}",
-                center_id=int(center_id) if center_id else None, user_id=user_id,
+                type='invalid_receipt',
+                title='Спроба надіслати невалідний чек',
+                message=(
+                    f"Користувач: {user_info.get('name', 'Невідомо')} ({user_id})\n"
+                    f"ЦН: {user_info.get('center', '—')}\nТип документа: {doc_type}"
+                ),
+                center_id=int(center_id) if center_id else None,
+                user_id=user_id,
                 receipt_path=receipt_path,
                 payload={
                     'document_type': doc_type,
                     'source': 'telegram',
-                    'amount': data.get('amount'),
+                    'amount': receipt_amount,
+                    'amount_missing': receipt_amount is None,
                     'receipt_date': data.get('receipt_date'),
                     'expense_name': data.get('expense_name'),
                     'category': data.get('category'),
                 }
             )
-            await msg.edit_text(
-                "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n"
-                "Повідомимо вас про рішення."
-            )
 
-            # Сповіщаємо адмінів із фото цього документа
-            user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
+            if receipt_amount is None:
+                await state.update_data(invalid_receipt_notification_id=notification_id)
+                await state.set_state(ReceiptState.waiting_for_invalid_receipt_amount)
+                cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                    text="Скасувати",
+                    callback_data=f"invalid_receipt_cancel:{notification_id}",
+                )]])
+                await msg.edit_text(
+                    "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n\n"
+                    "Не вдалося визначити суму. Надішліть, будь ласка, суму витрати числом "
+                    "(наприклад, 1250,50 грн), щоб адміністратор міг додати її до витрат.",
+                    reply_markup=cancel_kb,
+                )
+            else:
+                await msg.edit_text(
+                    "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n"
+                    "Повідомимо вас про рішення."
+                )
+
             caption = (
                 "⚠️ **Спроба надіслати невалідний чек**\n\n"
                 f"Користувач: {user_info.get('name', 'Невідомо')}\n"
                 f"ЦН: {user_info.get('center', '—')}\n"
                 f"Telegram ID: `{user_id}`\n"
-                                                f"Тип документа: {doc_type}\n"
-                f"Розпізнана сума: {data.get('amount') or 'не визначена'} грн"
-
+                f"Тип документа: {doc_type}\n"
+                f"Розпізнана сума: {receipt_amount if receipt_amount is not None else 'не визначена'} грн"
             )
             await notify_admins(
-                                                caption, user_id=user_id, photo=photo.file_id, parse_mode="Markdown",
+                caption,
+                user_id=user_id,
+                photo=photo.file_id,
+                parse_mode="Markdown",
                 notification_id=notification_id,
-
             )
-
-
-
             return
 
         amount = data['amount']
+
+
         expense_name = data['expense_name']
         category = data['category']
         
@@ -341,10 +380,42 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
             
         warning_msg = "⚠️ **Дату на чеку не знайдено. Встановлено поточну дату!**\n\n" if date_not_found else ""
         await msg.edit_text(
-            f"{warning_msg}⚠️ Не вдалося автоматично підібрати категорію.\nБудь ласка, оберіть найбільш підходящу зі списку:", 
+            f"{warning_msg}⚠️ Не вдалося автоматично підібрати категорію.\nБудь ласка, оберіть найбільш підходящу зі списку:",
             reply_markup=reply_markup,
-            parse_mode="Markdown"
+            parse_mode="Markdown",
         )
     else:
         data_fsm = await state.get_data()
         await render_summary(msg, data_fsm, state)
+
+
+
+@router.message(ReceiptState.waiting_for_invalid_receipt_amount, F.text)
+async def receive_invalid_receipt_amount(message: types.Message, state: FSMContext):
+    """Запитує суму у відправника, якщо AI не зміг її розпізнати."""
+    text = re.sub(r"(?:грн|₴)\s*$", "", message.text.strip(), flags=re.IGNORECASE)
+    try:
+        amount = float(text.replace(" ", "").replace(",", "."))
+    except ValueError:
+        amount = 0
+    if not math.isfinite(amount) or amount <= 0:
+        await message.answer("Введіть суму числом, більшою за нуль (наприклад, 1250,50).")
+        return
+
+    state_data = await state.get_data()
+    notification_id = state_data.get('invalid_receipt_notification_id')
+    if not notification_id or not await set_invalid_receipt_amount(
+        int(notification_id), message.from_user.id, amount
+    ):
+        await state.clear()
+        await message.answer("Цей запит уже закрито. Якщо потрібно, надішліть документ ще раз.")
+        return
+
+    await state.clear()
+    await message.answer("Дякую, суму передано адміністратору. Повідомимо вас про рішення.")
+    await notify_admins(
+        f"Користувач {message.from_user.full_name} ({message.from_user.id}) надав суму "
+        f"{amount:.2f} грн для документа, що очікує розгляду.",
+        user_id=message.from_user.id,
+    )
+

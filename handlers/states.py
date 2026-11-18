@@ -17,3 +17,5 @@ class ReceiptState(StatesGroup):
     waiting_for_edit_name = State()           # Введення нової назви текстом
     waiting_for_edit_category = State()       # Введення нової категорії текстом
     waiting_for_category_selection = State()  # Вибір категорії кнопками
+    waiting_for_invalid_receipt_amount = State()  # Очікування суми для невалідного чека
+

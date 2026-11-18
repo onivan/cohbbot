@@ -274,6 +274,12 @@ async def admin_decide_notification(notification_id: int, data: AdminNotificatio
         raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Сповіщення не знайдено")
+    if result.get("needs_amount"):
+        return {
+            "status": "ok",
+            "needs_amount": True,
+            "detail": "Вкажіть суму витрати перед погодженням",
+        }
     if result.get("already_decided"):
         return {"status": "ok", "already_decided": True, "decision": result.get("decision")}
 

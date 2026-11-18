@@ -6,8 +6,9 @@ from aiogram.fsm.context import FSMContext
 
 from database import (
     users_cache, add_expense, get_category_id_by_name, build_category_formula,
-    decide_invalid_receipt,
+    decide_invalid_receipt, close_invalid_receipt_by_user,
 )
+
 from bot_setup import bot
 
 from handlers.states import ReceiptState
@@ -85,7 +86,7 @@ async def process_callback(callback_query: types.CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data.startswith("invalid_receipt:"))
 async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
-    """Ադմինի որոշում չեկի վերաբերյալ Telegram-ի сповіщումից."""
+    """Обробляє рішення адміністратора щодо документа."""
     user_id = callback_query.from_user.id
     if str(users_cache.get(str(user_id), {}).get('role', '')).strip().lower() != 'admin':
         await callback_query.answer("Ця дія доступна лише адміністратору.", show_alert=True)
@@ -101,10 +102,16 @@ async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
         if result.get('already_decided'):
             await callback_query.answer("Це сповіщення вже опрацьоване.", show_alert=True)
             return
+        if result.get('needs_amount'):
+            await callback_query.answer(
+                "Суму не визначено. Дочекайтеся, поки користувач надішле її, або введіть суму в адмін-панелі.",
+                show_alert=True,
+            )
+            return
     except ValueError as e:
         await callback_query.answer(str(e), show_alert=True)
         return
-    except Exception as e:
+    except Exception:
         await callback_query.answer("Не вдалося зберегти рішення.", show_alert=True)
         return
 
@@ -138,6 +145,27 @@ async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
     except Exception:
         pass
     await callback_query.answer("Рішення збережено.")
+
+
+@router.callback_query(F.data.startswith("invalid_receipt_cancel:"), ReceiptState.waiting_for_invalid_receipt_amount)
+
+async def cancel_invalid_receipt_amount(callback_query: types.CallbackQuery, state: FSMContext):
+    """Дозволяє автору відмовитися від передачі документа на розгляд."""
+    try:
+        notification_id = int(callback_query.data.rsplit(':', 1)[1])
+    except (TypeError, ValueError):
+        await callback_query.answer("Некоректний запит.", show_alert=True)
+        return
+
+    closed = await close_invalid_receipt_by_user(notification_id, callback_query.from_user.id)
+    await state.clear()
+    if closed:
+        await callback_query.message.edit_text("🚫 Запит скасовано.")
+        await callback_query.answer("Запит скасовано.")
+    else:
+        await callback_query.answer("Цей запит уже закрито.", show_alert=True)
+
+
 
 
 

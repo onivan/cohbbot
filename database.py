@@ -1991,6 +1991,71 @@ async def set_admin_notification_read(notification_id: int, is_read: bool, actor
             return await cur.fetchone() is not None
 
 
+async def set_invalid_receipt_amount(notification_id: int, user_id: int, amount: float) -> bool:
+    """Зберігає суму, надану автором, лише для його відкритого документа."""
+    amount = float(amount)
+    if not math.isfinite(amount) or amount <= 0:
+        raise ValueError('Сума має бути більшою за нуль')
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT payload, message FROM admin_notifications
+                   WHERE id = %s AND type = 'invalid_receipt' AND user_id = %s
+                     AND status = 'open' FOR UPDATE""",
+                (notification_id, user_id)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return False
+            try:
+                payload = json.loads(row.get('payload') or '{}')
+            except (TypeError, ValueError):
+                payload = {}
+            payload['amount'] = round(amount, 2)
+            payload['amount_missing'] = False
+            message = row.get('message') or ''
+            if 'Сума від користувача:' not in message:
+                message += f"\nСума від користувача: {amount:g} грн"
+            await cur.execute(
+                """UPDATE admin_notifications SET payload = %s, message = %s
+                   WHERE id = %s AND status = 'open'""",
+                (json.dumps(payload, ensure_ascii=False), message, notification_id)
+            )
+            return cur.rowcount > 0
+
+
+async def close_invalid_receipt_by_user(notification_id: int, user_id: int) -> bool:
+    """Закриває запит на суму, якщо його скасував автор документа."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT payload FROM admin_notifications
+                   WHERE id = %s AND type = 'invalid_receipt' AND user_id = %s
+                     AND status = 'open' FOR UPDATE""",
+                (notification_id, user_id)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return False
+            try:
+                payload = json.loads(row.get('payload') or '{}')
+            except (TypeError, ValueError):
+                payload = {}
+            payload['decision'] = 'rejected'
+            payload['canceled_by_user'] = True
+            await cur.execute(
+                """UPDATE admin_notifications
+                   SET status = 'resolved', action_status = 'rejected',
+                       action_at = NOW(), action_by = %s, resolved_at = NOW(),
+                       resolved_by = %s, payload = %s
+                   WHERE id = %s AND status = 'open'""",
+                (user_id, user_id, json.dumps(payload, ensure_ascii=False), notification_id)
+            )
+            return cur.rowcount > 0
+
+
 async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: int,
                                  expense_data: dict = None):
     """Вирішує звернення щодо чека; погоджений чек додається як витрата атомарно."""
@@ -2041,6 +2106,13 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
                     except (TypeError, ValueError):
                         amount = 0
                     if not math.isfinite(amount) or amount <= 0:
+                        if not expense_data and not payload.get('amount'):
+                            await conn.rollback()
+                            return {
+                                'needs_amount': True,
+                                'user_id': notification['user_id'],
+                                'notification_id': notification_id,
+                            }
                         raise ValueError('Вкажіть коректну суму витрати, більшу за нуль')
 
                     overrides = expense_data or {}
