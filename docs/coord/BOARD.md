@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: B4 (залишок: попап перегляду чека в журналі сповіщень)
+- branch: dev
+- since: 2026-11-18T15:26:10Z
+- note: UI/JS-фікс у межах B4; схема БД не змінюється; горизонт ~1 год
 
 ---
 
