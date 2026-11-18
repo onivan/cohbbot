@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-windows
-- task: B4 notifications inbox
-- branch: dev
-- since: 2026-11-18T11:51:20Z
-- note: завершити перевірку B4, закомітити й підготувати staging-деплой
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 ---
 
 ## Журнал передач
@@ -73,5 +73,12 @@
 - Перед деплоєм staging-тести: `test_cash.py` PASS 63 / FAIL 0 / SKIP 0; `test_centers_own.py` PASS 33 / FAIL 0 / KNOWN 1 (відома H1: читання бюджетів чужого ЦН).
 - Зміни документаційні: міграцій і ручних кроків немає. Рестарт може скинути staging-сесії через відомий H2 (`SECRET_KEY` відсутній у staging `.env`).
 - Наступний крок: вибрати задачу з TODO; перед K1 узгодити дедлайн і нагадування.
+
+### 2026-11-18T12:01Z · B4 · ws-windows
+- Коміти: `0927b8c` (reclaim B4), `156f5fc` (feat(admin): notifications inbox), опубліковані в `origin/dev`.
+- Перевірки: `py_compile` пройшов для всіх змінених Python-модулів; staging smoke/invariant suite до деплою: `test_cash.py` PASS 63 / FAIL 0 / SKIP 0; `test_centers_own.py` PASS 33 / FAIL 0 / KNOWN 1 (відомий H1). Нові B4-specific інтеграційні тести не додані.
+- Деплой не виконано: `deploy.sh` запускає серверний post-receive hook, що перезапускає systemd-службу; цей агент не виконує привілейовані серверні операції. Зміни потребують staging-деплою користувачем.
+- Ручні кроки: запустити `./deploy.sh` з клона `dev`, потім перевірити `make status` і `make test`; перший запуск застосує ідемпотентну схему журналу сповіщень. Врахувати H2: рестарт може завершити staging-сесії через відсутній `SECRET_KEY`.
+- Наступний крок: staging-деплой і перевірка B4; після успіху вибрати наступну задачу з TODO.
 
 
