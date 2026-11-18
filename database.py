@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import json
+import math
 import re
 import uuid
 import time
@@ -1853,6 +1854,11 @@ async def ensure_notifications_schema():
                     `receipt_path` TEXT NULL,
                     `payload` TEXT NULL,
                     `status` ENUM('open','resolved') NOT NULL DEFAULT 'open',
+                    `action_status` ENUM('pending','approved','rejected','resolved') NOT NULL DEFAULT 'pending',
+                    `action_at` DATETIME NULL,
+                    `action_by` BIGINT NULL,
+                    `read_at` DATETIME NULL,
+                    `read_by` BIGINT NULL,
                     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     `resolved_at` DATETIME NULL,
                     `resolved_by` BIGINT NULL,
@@ -1861,6 +1867,21 @@ async def ensure_notifications_schema():
                     INDEX `idx_admin_notifications_center` (`center_id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
+            # Міграція ідемпотентна для інсталяцій, де журнал уже створений.
+            for ddl in (
+                "ALTER TABLE `admin_notifications` ADD COLUMN `action_status` ENUM('pending','approved','rejected','resolved') NOT NULL DEFAULT 'pending'",
+                "ALTER TABLE `admin_notifications` ADD COLUMN `action_at` DATETIME NULL",
+                "ALTER TABLE `admin_notifications` ADD COLUMN `action_by` BIGINT NULL",
+                "ALTER TABLE `admin_notifications` ADD COLUMN `read_at` DATETIME NULL",
+                "ALTER TABLE `admin_notifications` ADD COLUMN `read_by` BIGINT NULL",
+            ):
+                try:
+                    await cur.execute(ddl)
+                except Exception:
+                    pass  # колонка вже існує
+            await cur.execute(
+                "UPDATE admin_notifications SET action_status = 'resolved' WHERE status = 'resolved' AND action_status = 'pending'"
+            )
 
 
 async def create_admin_notification(type: str, title: str, message: str,
@@ -1881,7 +1902,8 @@ async def create_admin_notification(type: str, title: str, message: str,
 
 async def list_admin_notifications(status: str = None, type: str = None,
                                   center_id: int = None, date_from: str = None,
-                                  date_to: str = None, limit: int = 200):
+                                  date_to: str = None, is_read: bool = None,
+                                  action_status: str = None, limit: int = 200):
     pool = await get_pool()
     conditions, params = [], []
     if status in ('open', 'resolved'):
@@ -1890,6 +1912,11 @@ async def list_admin_notifications(status: str = None, type: str = None,
     if type:
         conditions.append("n.type = %s")
         params.append(type)
+    if is_read is not None:
+        conditions.append("n.read_at IS NOT NULL" if is_read else "n.read_at IS NULL")
+    if action_status in ('pending', 'approved', 'rejected', 'resolved'):
+        conditions.append("n.action_status = %s")
+        params.append(action_status)
     if center_id:
         conditions.append("n.center_id = %s")
         params.append(center_id)
@@ -1918,7 +1945,7 @@ async def list_admin_notifications(status: str = None, type: str = None,
             row['payload'] = json.loads(row.get('payload') or '{}')
         except (TypeError, ValueError):
             row['payload'] = {}
-        for key in ('created_at', 'resolved_at'):
+        for key in ('created_at', 'resolved_at', 'action_at', 'read_at'):
             if row.get(key):
                 row[key] = str(row[key])
     return rows
@@ -1933,10 +1960,144 @@ async def set_admin_notification_status(notification_id: int, status: str, actor
             await cur.execute(
                 """UPDATE admin_notifications
                    SET status = %s,
+                       action_status = CASE
+                           WHEN action_status IN ('approved','rejected') THEN action_status
+                           WHEN %s = 'resolved' THEN 'resolved'
+                           ELSE 'pending'
+                       END,
+                       action_at = IF(%s = 'resolved', NOW(), action_at),
+                       action_by = IF(%s = 'resolved', %s, action_by),
                        resolved_at = IF(%s = 'resolved', NOW(), NULL),
                        resolved_by = IF(%s = 'resolved', %s, NULL)
                    WHERE id = %s""",
-                (status, status, status, actor_id, notification_id)
+                (status, status, status, status, actor_id, status, status, actor_id, notification_id)
             )
             return cur.rowcount > 0
+
+
+async def set_admin_notification_read(notification_id: int, is_read: bool, actor_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE admin_notifications
+                   SET read_at = IF(%s, NOW(), NULL), read_by = IF(%s, %s, NULL)
+                   WHERE id = %s""",
+                (bool(is_read), bool(is_read), actor_id, notification_id)
+            )
+            if cur.rowcount > 0:
+                return True
+            await cur.execute("SELECT 1 FROM admin_notifications WHERE id = %s", (notification_id,))
+            return await cur.fetchone() is not None
+
+
+async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: int,
+                                 expense_data: dict = None):
+    """Вирішує звернення щодо чека; погоджений чек додається як витрата атомарно."""
+    if decision not in ('approved', 'rejected'):
+        raise ValueError('Невідоме рішення щодо чека')
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT * FROM admin_notifications
+                       WHERE id = %s AND type = 'invalid_receipt' FOR UPDATE""",
+                    (notification_id,)
+                )
+                notification = await cur.fetchone()
+                if not notification:
+                    await conn.rollback()
+                    return None
+
+                try:
+                    payload = json.loads(notification.get('payload') or '{}')
+                except (TypeError, ValueError):
+                    payload = {}
+
+                if notification['status'] != 'open' or notification.get('action_status') in ('approved', 'rejected'):
+                    await conn.rollback()
+                    return {
+                        'already_decided': True,
+                        'decision': notification.get('action_status') or payload.get('decision'),
+                        'user_id': notification['user_id'],
+                    }
+
+                expense_id = None
+                amount = None
+                receipt_date = None
+                category_name = None
+                expense_name = None
+                center_id = notification['center_id']
+
+                if decision == 'approved':
+                    user_id = int(notification['user_id'])
+                    center_id = int(center_id)
+                    amount_value = (expense_data or {}).get('amount', payload.get('amount'))
+                    try:
+                        amount = float(amount_value or 0)
+                    except (TypeError, ValueError):
+                        amount = 0
+                    if not math.isfinite(amount) or amount <= 0:
+                        raise ValueError('Вкажіть коректну суму витрати, більшу за нуль')
+
+                    overrides = expense_data or {}
+                    receipt_date = str(
+                        overrides.get('date') or payload.get('receipt_date')
+                        or datetime.now().strftime('%Y-%m-%d')
+                    )[:10]
+                    try:
+                        datetime.strptime(receipt_date, '%Y-%m-%d')
+                    except ValueError:
+                        raise ValueError('Дата витрати має бути у форматі YYYY-MM-DD')
+                    expense_name = str(
+                        overrides.get('expense_name') or payload.get('expense_name')
+                        or payload.get('document_type') or 'Чек'
+                    ).strip()[:191]
+                    category_name = str(
+                        overrides.get('category') or payload.get('category') or 'Інше'
+                    ).strip()
+                    if not expense_name or not category_name:
+                        raise ValueError('Вкажіть назву витрати та категорію')
+                    category_id = await get_category_id_by_name(category_name, user_id)
+                    expense_id = f"exp_{int(time.time() * 1000)}_{user_id}_{uuid.uuid4().hex[:4]}"
+                    await cur.execute(
+                        """INSERT INTO expenses
+                               (id, date, telegram_id, center_id, amount, expense_name, category_id, receipt_path)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                        (expense_id, receipt_date, user_id, center_id, amount,
+                         expense_name, category_id, notification.get('receipt_path'))
+                    )
+
+                payload['decision'] = decision
+                payload['decided_by'] = int(actor_id)
+                payload['expense_id'] = expense_id
+                await cur.execute(
+                    """UPDATE admin_notifications
+                       SET status = 'resolved', action_status = %s,
+                           action_at = NOW(), action_by = %s, payload = %s,
+                           resolved_at = NOW(), resolved_by = %s
+                       WHERE id = %s AND status = 'open'""",
+                    (decision, actor_id, json.dumps(payload, ensure_ascii=False), actor_id, notification_id)
+                )
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+
+    if decision == 'approved':
+        await _touch_cash_safe(center_id, receipt_date, reason=f"чек погоджено адміном ({expense_id})")
+
+    return {
+        'already_decided': False,
+        'decision': decision,
+        'user_id': notification['user_id'],
+        'amount': amount,
+        'receipt_date': receipt_date,
+        'category': category_name,
+        'expense_name': expense_name,
+        'expense_id': expense_id,
+    }
 

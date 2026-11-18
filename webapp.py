@@ -228,6 +228,8 @@ async def admin_page(request: Request):
 async def admin_get_notifications(status: Optional[str] = None, type: Optional[str] = None,
                                   center_id: Optional[int] = None,
                                   date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                  is_read: Optional[bool] = None,
+                                  action_status: Optional[str] = None,
                                   current_user: int = Depends(get_current_user)):
     _require_admin(current_user)
     for value in (date_from, date_to):
@@ -238,13 +240,65 @@ async def admin_get_notifications(status: Optional[str] = None, type: Optional[s
                 raise HTTPException(status_code=400, detail="Дата має бути у форматі YYYY-MM-DD")
     data = await database.list_admin_notifications(
         status=status, type=type, center_id=center_id,
-        date_from=date_from, date_to=date_to
+        date_from=date_from, date_to=date_to, is_read=is_read,
+        action_status=action_status
     )
     return {"status": "ok", "data": data}
 
 
 class AdminNotificationStatusData(BaseModel):
     status: str
+
+
+class AdminNotificationDecisionData(BaseModel):
+    decision: str
+    expense_data: Optional[dict] = None
+
+
+class AdminNotificationReadData(BaseModel):
+    is_read: bool
+
+
+@app.post("/api/admin/notifications/{notification_id}/decision")
+async def admin_decide_notification(notification_id: int, data: AdminNotificationDecisionData,
+                                    current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    if data.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Рішення має бути approved або rejected")
+    try:
+        result = await database.decide_invalid_receipt(
+            notification_id, data.decision, current_user,
+            expense_data=data.expense_data,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail="Сповіщення не знайдено")
+    if result.get("already_decided"):
+        return {"status": "ok", "already_decided": True, "decision": result.get("decision")}
+
+    user_message = (
+        f"✅ Адміністратор погодив документ. Витрату додано: {result['amount']} грн за {result['receipt_date']}."
+        if data.decision == "approved"
+        else "❌ Адміністратор переглянув документ, але не погодив його як витрату."
+    )
+    try:
+        await bot.send_message(int(result["user_id"]), user_message)
+    except Exception as e:
+        logging.warning(f"Не вдалося повідомити користувача {result['user_id']} про рішення: {e}")
+    return {"status": "ok", "data": result}
+
+
+@app.put("/api/admin/notifications/{notification_id}/read")
+async def admin_set_notification_read(notification_id: int, data: AdminNotificationReadData,
+                                      current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    updated = await database.set_admin_notification_read(
+        notification_id, data.is_read, current_user
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Сповіщення не знайдено")
+    return {"status": "ok"}
 
 
 @app.put("/api/admin/notifications/{notification_id}")

@@ -361,9 +361,10 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 // ЖУРНАЛ АДМІНСЬКИХ СПОВІЩЕНЬ
 // ==========================================
 async function loadNotifications() {
-    const params = new URLSearchParams();
+        const params = new URLSearchParams();
     const fields = {
         status: 'notification-status', type: 'notification-type',
+        is_read: 'notification-read', action_status: 'notification-action-status',
         center_id: 'notification-center', date_from: 'notification-from', date_to: 'notification-to'
     };
     Object.entries(fields).forEach(([key, id]) => {
@@ -371,10 +372,10 @@ async function loadNotifications() {
         if (value) params.set(key, value);
     });
     const tbody = document.querySelector('#notifications-table tbody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="5">Завантаження…</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6">Завантаження…</td></tr>';
     const res = await fetchWithAuth(`/api/admin/notifications?${params.toString()}`);
     if (!res || !res.ok) {
-        if (tbody) tbody.innerHTML = '<tr><td colspan="5">Не вдалося завантажити сповіщення</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6">Не вдалося завантажити сповіщення</td></tr>';
         return;
     }
     const body = await res.json();
@@ -382,23 +383,75 @@ async function loadNotifications() {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">Сповіщень немає</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">Сповіщень немає</td></tr>';
         return;
     }
     rows.forEach(n => {
         const tr = document.createElement('tr');
         const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс'})[n.type] || n.type;
         const receipt = n.receipt_path ? `<a href="${cashEsc(n.receipt_path)}" target="_blank" rel="noopener">Переглянути чек</a>` : '';
-        const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
-        const actions = [receipt, chat, n.status === 'open'
+                const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
+        const actionStatus = n.action_status || (n.status === 'resolved' ? 'resolved' : 'pending');
+        const receiptDecision = n.type === 'invalid_receipt' && actionStatus === 'pending'
+            ? `<button class="btn-mini" style="background:#2e7d32;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'approved')">Погодити</button>
+               <button class="btn-mini" style="background:#c62828;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'rejected')">Відхилити</button>`
+            : '';
+        const readAction = n.read_at
+            ? `<button class="btn-mini" onclick="setNotificationRead(${n.id}, false)">Позначити непрочитаним</button>`
+            : `<button class="btn-mini" onclick="setNotificationRead(${n.id}, true)">Позначити прочитаним</button>`;
+        const actions = [receipt, chat, receiptDecision, readAction, n.status === 'open'
             ? `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'resolved')">Опрацьовано</button>`
             : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
+        const actionLabels = {pending:'Очікує рішення', approved:'Погоджено', rejected:'Відхилено', resolved:'Опрацьовано'};
+        const readLabel = n.read_at ? `Прочитане${n.read_by ? ` адміністратором #${cashEsc(n.read_by)}` : ''}` : 'Непрочитане';
+        const actionLabel = actionLabels[actionStatus] || actionStatus;
         tr.innerHTML = `<td style="white-space:nowrap;">${cashEsc(n.created_at || '')}</td>
             <td><b>${cashEsc(typeLabel)}: ${cashEsc(n.title)}</b><div style="white-space:pre-wrap;font-size:12px;margin-top:4px;">${cashEsc(n.message)}</div>
             <div style="font-size:11px;color:#888;">${n.status === 'open' ? 'Відкрите' : 'Опрацьоване'}</div></td>
-            <td>${cashEsc(n.center_name || '—')}</td><td>${cashEsc(n.user_name || n.user_id || '—')}</td><td>${actions}</td>`;
+            <td>${cashEsc(n.center_name || '—')}</td><td>${cashEsc(n.user_name || n.user_id || '—')}</td>
+            <td><div>${cashEsc(actionLabel)}</div><div style="font-size:11px;color:#888;">${readLabel}</div></td><td>${actions}</td>`;
         tbody.appendChild(tr);
     });
+}
+
+async function decideAdminReceipt(id, decision) {
+    const promptText = decision === 'approved'
+        ? 'Погодити документ і додати його як витрату?'
+        : 'Відхилити цей документ?';
+    if (!confirm(promptText)) return;
+
+    let expenseData;
+    if (decision === 'approved') {
+        const amountText = prompt('Сума витрати (грн):');
+        if (amountText === null) return;
+        const amount = Number(amountText.trim().replace(',', '.'));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            alert('Введіть коректну суму, більшу за нуль.');
+            return;
+        }
+        const date = prompt('Дата витрати (YYYY-MM-DD):', cashToday());
+        if (date === null) return;
+        const expense_name = prompt('Назва витрати:', 'Чек');
+        if (expense_name === null) return;
+        const category = prompt('Категорія:', 'Інше');
+        if (category === null) return;
+        expenseData = {amount, date: date.trim(), expense_name: expense_name.trim(), category: category.trim()};
+    }
+
+    const res = await fetchWithAuth(`/api/admin/notifications/${id}/decision`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({decision, ...(expenseData ? {expense_data: expenseData} : {})})
+    });
+
+    if (res && res.ok) {
+        loadNotifications();
+        return;
+    }
+    if (res) {
+        let message = 'Не вдалося зберегти рішення';
+        try { message = (await res.json()).detail || message; } catch (e) {}
+        alert(message);
+    }
 }
 
 async function setNotificationStatus(id, status) {
@@ -408,6 +461,15 @@ async function setNotificationStatus(id, status) {
     });
     if (res && res.ok) loadNotifications();
     else if (res) alert('Не вдалося оновити сповіщення');
+}
+
+async function setNotificationRead(id, isRead) {
+    const res = await fetchWithAuth(`/api/admin/notifications/${id}/read`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({is_read: isRead})
+    });
+    if (res && res.ok) loadNotifications();
+    else if (res) alert('Не вдалося оновити прочитаність сповіщення');
 }
 
 // ==========================================

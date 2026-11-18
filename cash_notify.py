@@ -10,6 +10,8 @@ import logging
 from bot_setup import bot
 from config import CASH_NOTIFY
 from database import users_cache, get_centers, create_admin_notification
+from telegram_notifications import notify_admins
+
 
 
 _bg_tasks = set()
@@ -26,12 +28,7 @@ def _money(value) -> str:
     return f"{float(value or 0):,.2f}".replace(",", "\u00a0").replace(".", ",")
 
 
-def _admin_ids() -> list:
-    """Telegram ID усіх адміністраторів (з кешу користувачів)."""
-    return [
-        int(uid) for uid, info in users_cache.items()
-        if str(info.get('role', '')).strip().lower() == 'admin'
-    ]
+
 
 
 def _center_user_ids(center_id: int) -> list:
@@ -128,10 +125,23 @@ async def _notify_center(center_id: int, op: dict, closing) -> None:
     await _send_many(recipients, "\n".join(lines))
 
 
+async def _notify_admin_operation(center_id: int, op: dict, closing) -> None:
+    center_name = await _center_name(center_id)
+    lines = [
+        f"💸 {KIND_LABELS.get(op.get('kind'), 'Рух коштів')}",
+        f"ЦН «{center_name}» · {op.get('op_date') or op.get('month') or ''}",
+        f"Сума: {_money(op.get('signed_amount'))} грн",
+    ]
+    if op.get('counterparty'):
+        lines.append(f"Контрагент: {op['counterparty']}")
+    if op.get('comment'):
+        lines.append(f"Коментар: {op['comment']}")
+    if closing is not None:
+        lines.append(f"Залишок: {_money(closing)} грн")
+    await notify_admins("\n".join(lines))
+
+
 async def _notify_negative(center_id: int, op: dict, closing) -> None:
-    admins = _admin_ids()
-    if not admins:
-        return
     center_name = await _center_name(center_id)
     text = "\n".join([
         "⚠️ Мінусовий залишок коштів",
@@ -140,7 +150,8 @@ async def _notify_negative(center_id: int, op: dict, closing) -> None:
         f"Остання операція: {KIND_LABELS.get(op.get('kind'), '—')} "
         f"{_money(op.get('signed_amount'))} грн",
     ])
-    await _send_many(admins, text)
+    await notify_admins(text)
+
 
 
 def after_operation(op: dict, summary: dict) -> None:
@@ -154,10 +165,13 @@ def after_operation(op: dict, summary: dict) -> None:
     if summary and summary.get('configured'):
         closing = summary.get('closing_balance')
 
-    # Журнал у БД ведеться незалежно від Telegram-сповіщень.
+        # Журнал у БД ведеться незалежно від Telegram-сповіщень.
     _spawn(_persist_cash_operation(op['center_id'], op, closing))
     if CASH_NOTIFY:
         _spawn(_notify_center(op['center_id'], op, closing))
+        _spawn(_notify_admin_operation(op['center_id'], op, closing))
+
+
 
     # Мінусовий залишок — тільки момент переходу в мінус, щоб не спамити
     if closing is not None and closing < 0:

@@ -16,24 +16,19 @@ from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
-    get_all_users, get_active_ai_model, create_admin_notification,
+    get_active_ai_model, create_admin_notification,
 )
+from telegram_notifications import notify_admins
 
 from ai_service import parse_receipt_image, AIServiceError
+
 from handlers.states import ReceiptState
 
 router = Router()
 
 
-def _admin_ids():
-    """Список Telegram ID усіх адміністраторів."""
-    return [
-        u['user_id'] for u in get_all_users()
-        if str(users_cache.get(str(u['user_id']), {}).get('role', '')).strip().lower() == 'admin'
-    ]
-
-
 async def notify_admins_ai_error(err, model_config, user_id, user_name):
+
     """
     Повідомляє адміністраторів про проблему з AI (вичерпані кошти, недійсний ключ,
     відсутня модель тощо). Для «звичайних» помилок розпізнавання — не турбує.
@@ -56,12 +51,9 @@ async def notify_admins_ai_error(err, model_config, user_id, user_name):
         "💳 Перевірте баланс OpenRouter або змініть активну модель у панелі адміністратора.",
     ]
     text = "\n".join(lines)
+    await notify_admins(text, user_id=user_id)
 
-    for admin_id in _admin_ids():
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception as e:
-            logging.error(f"Не вдалося сповістити адміна {admin_id}: {e}")
+
 
 async def render_summary(message_obj: types.Message, data: dict, state: FSMContext):
     """
@@ -204,6 +196,7 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
             )
         
                 # A1. Валідація «це чек?»: якщо AI визначив, що це не фіскальний чек
+
         if not data.get('is_receipt', True):
 
 
@@ -221,19 +214,25 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 receipt_path = f"{WEBAPP_URL}/{local_path}"
             except Exception as e:
                 logging.error(f"Не вдалося зберегти невалідний документ: {e}")
-            await create_admin_notification(
+            notification_id = await create_admin_notification(
                 type='invalid_receipt', title='Спроба надіслати невалідний чек',
                 message=f"Користувач: {user_info.get('name', 'Невідомо')} ({user_id})\nЦН: {user_info.get('center', '—')}\nТип документа: {doc_type}",
                 center_id=int(center_id) if center_id else None, user_id=user_id,
                 receipt_path=receipt_path,
-                payload={'document_type': doc_type, 'source': 'telegram'}
+                payload={
+                    'document_type': doc_type,
+                    'source': 'telegram',
+                    'amount': data.get('amount'),
+                    'receipt_date': data.get('receipt_date'),
+                    'expense_name': data.get('expense_name'),
+                    'category': data.get('category'),
+                }
             )
             await msg.edit_text(
-                "❌ Це не схоже на фіскальний чек.\n"
-                f"Розпізнано як: {doc_type}.\n\n"
-
-                "Будь ласка, надішліть фото саме фіскального чека."
+                "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n"
+                "Повідомимо вас про рішення."
             )
+
             # Сповіщаємо адмінів із фото цього документа
             user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
             caption = (
@@ -241,20 +240,18 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 f"Користувач: {user_info.get('name', 'Невідомо')}\n"
                 f"ЦН: {user_info.get('center', '—')}\n"
                 f"Telegram ID: `{user_id}`\n"
-                f"Тип документа: {doc_type}"
+                                                f"Тип документа: {doc_type}\n"
+                f"Розпізнана сума: {data.get('amount') or 'не визначена'} грн"
+
             )
-            admins = [u for u in get_all_users()
-                      if str(users_cache.get(str(u['user_id']), {}).get('role', '')).strip().lower() == 'admin']
-            for admin in admins:
-                try:
-                    await bot.send_photo(
-                        admin['user_id'],
-                        photo=photo.file_id,
-                        caption=caption,
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass
+            await notify_admins(
+                                                caption, user_id=user_id, photo=photo.file_id, parse_mode="Markdown",
+                notification_id=notification_id,
+
+            )
+
+
+
             return
 
         amount = data['amount']

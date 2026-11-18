@@ -195,9 +195,16 @@
             <select id="notification-status" onchange="loadNotifications()" style="padding:7px;">
                 <option value="">Усі стани</option><option value="open">Відкриті</option><option value="resolved">Опрацьовані</option>
             </select>
-            <select id="notification-type" onchange="loadNotifications()" style="padding:7px;">
+                        <select id="notification-type" onchange="loadNotifications()" style="padding:7px;">
                 <option value="">Усі типи</option><option value="invalid_receipt">Невалідний чек</option>
                 <option value="cash_operation">Операція з коштами</option><option value="negative_balance">Мінусовий баланс</option>
+            </select>
+            <select id="notification-read" onchange="loadNotifications()" style="padding:7px;">
+                <option value="">Прочитаність: усі</option><option value="false">Непрочитані</option><option value="true">Прочитані</option>
+            </select>
+            <select id="notification-action-status" onchange="loadNotifications()" style="padding:7px;">
+                <option value="">Рішення: усі</option><option value="pending">Очікує рішення</option>
+                <option value="approved">Погоджено</option><option value="rejected">Відхилено</option><option value="resolved">Опрацьовано</option>
             </select>
             <select id="notification-center" onchange="loadNotifications()" style="padding:7px;"><option value="">Усі ЦН</option></select>
             <label>Від <input type="date" id="notification-from" onchange="loadNotifications()"></label>
@@ -206,8 +213,8 @@
         </div>
         <div style="overflow-x:auto;">
             <table id="notifications-table" style="min-width:850px;">
-                <thead><tr><th>Дата</th><th>Тип / повідомлення</th><th>ЦН</th><th>Користувач</th><th>Дії</th></tr></thead>
-                <tbody><tr><td colspan="5">Оберіть фільтри або оновіть журнал</td></tr></tbody>
+                                <thead><tr><th>Дата</th><th>Тип / повідомлення</th><th>ЦН</th><th>Користувач</th><th>Рішення</th><th>Дії</th></tr></thead>
+                <tbody><tr><td colspan="6">Оберіть фільтри або оновіть журнал</td></tr></tbody>
             </table>
         </div>
     </div>
