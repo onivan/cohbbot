@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: deploy TODO docs to staging VPS
+- branch: dev
+- since: 2026-11-18T08:48:04Z
+- note: перевірити staging-тести та задеплоїти dev через офіційний deploy.sh
 ---
 
 ## Журнал передач
