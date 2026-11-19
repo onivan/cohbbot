@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: A3
+- branch: dev
+- since: 2026-11-19T18:31:50Z
+- note: виправляю перевірку власника файлу чека в поданні невалідного документа
 
 ---
 
