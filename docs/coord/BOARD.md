@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: A4
+- branch: dev
+- since: 2026-11-19T18:50:28Z
+- note: додаю AI-розпізнавання для чека, завантаженого з Web App, з Telegram-карткою підтвердження
 
 ---
 
