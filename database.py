@@ -1874,6 +1874,7 @@ async def ensure_notifications_schema():
                 "ALTER TABLE `admin_notifications` ADD COLUMN `action_by` BIGINT NULL",
                 "ALTER TABLE `admin_notifications` ADD COLUMN `read_at` DATETIME NULL",
                 "ALTER TABLE `admin_notifications` ADD COLUMN `read_by` BIGINT NULL",
+                "ALTER TABLE `admin_notifications` ADD INDEX `idx_admin_notifications_unread` (`read_at`)",
             ):
                 try:
                     await cur.execute(ddl)
@@ -1884,27 +1885,62 @@ async def ensure_notifications_schema():
             )
 
 
+# Типи подій, що потребують рішення адміністратора (решта — лише інформаційні).
+ACTIONABLE_NOTIFICATION_TYPES = {'invalid_receipt'}
+NOTIFICATION_ACTION_STATUSES = ('pending', 'approved', 'rejected', 'resolved')
+
+
 async def create_admin_notification(type: str, title: str, message: str,
                                    center_id: int = None, user_id: int = None,
-                                   receipt_path: str = None, payload: dict = None):
+                                   receipt_path: str = None, payload: dict = None,
+                                   action_status: str = None):
+    """Створює подію журналу.
+
+    Для типів, що потребують рішення адміністратора (``invalid_receipt``), статус дії
+    лишається ``pending``. Для інформаційних подій (``cash_operation``,
+    ``negative_balance``) одразу ставимо ``resolved``, щоб вони не потрапляли
+    у фільтр «Очікує рішення».
+    """
+    if action_status is None:
+        action_status = 'pending' if type in ACTIONABLE_NOTIFICATION_TYPES else 'resolved'
+    if action_status not in NOTIFICATION_ACTION_STATUSES:
+        raise ValueError(f'Невідомий статус дії сповіщення: {action_status}')
+    action_at = None if action_status == 'pending' else datetime.now()
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """INSERT INTO admin_notifications
-                       (type, title, message, center_id, user_id, receipt_path, payload)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                       (type, title, message, center_id, user_id, receipt_path,
+                        payload, action_status, action_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (type, title, message, center_id, user_id, receipt_path,
-                 json.dumps(payload or {}, ensure_ascii=False))
+                 json.dumps(payload or {}, ensure_ascii=False), action_status, action_at)
             )
             return cur.lastrowid
 
 
-async def list_admin_notifications(status: str = None, type: str = None,
-                                  center_id: int = None, date_from: str = None,
-                                  date_to: str = None, is_read: bool = None,
-                                  action_status: str = None, limit: int = 200):
-    pool = await get_pool()
+def _notification_row(row):
+    """Нормалізує рядок журналу: payload → dict, дати → str, зручні прапорці."""
+    item = dict(row)
+    try:
+        payload = json.loads(item.get('payload') or '{}')
+    except (TypeError, ValueError):
+        payload = {}
+    item['payload'] = payload if isinstance(payload, dict) else {}
+    for key in ('created_at', 'resolved_at', 'action_at', 'read_at'):
+        if item.get(key):
+            item[key] = str(item[key])
+    item['canceled_by_user'] = bool(item['payload'].get('canceled_by_user'))
+    item['telegram_messages'] = item['payload'].get('telegram') or []
+    return item
+
+
+def _notification_conditions(status: str = None, type: str = None, center_id: int = None,
+                             date_from: str = None, date_to: str = None,
+                             is_read: bool = None, action_status: str = None):
+    """Спільні умови фільтрації журналу: (SQL-фрагмент WHERE, параметри)."""
     conditions, params = [], []
     if status in ('open', 'resolved'):
         conditions.append("n.status = %s")
@@ -1914,7 +1950,7 @@ async def list_admin_notifications(status: str = None, type: str = None,
         params.append(type)
     if is_read is not None:
         conditions.append("n.read_at IS NOT NULL" if is_read else "n.read_at IS NULL")
-    if action_status in ('pending', 'approved', 'rejected', 'resolved'):
+    if action_status in NOTIFICATION_ACTION_STATUSES:
         conditions.append("n.action_status = %s")
         params.append(action_status)
     if center_id:
@@ -1927,7 +1963,21 @@ async def list_admin_notifications(status: str = None, type: str = None,
         conditions.append("n.created_at < DATE_ADD(%s, INTERVAL 1 DAY)")
         params.append(date_to)
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
-    params.append(max(1, min(int(limit), 500)))
+    return where, params
+
+
+async def list_admin_notifications(status: str = None, type: str = None,
+                                  center_id: int = None, date_from: str = None,
+                                  date_to: str = None, is_read: bool = None,
+                                  action_status: str = None, limit: int = 100,
+                                  offset: int = 0):
+    where, params = _notification_conditions(
+        status=status, type=type, center_id=center_id, date_from=date_from,
+        date_to=date_to, is_read=is_read, action_status=action_status,
+    )
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+    pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
@@ -1936,19 +1986,80 @@ async def list_admin_notifications(status: str = None, type: str = None,
                     LEFT JOIN centers c ON c.id = n.center_id
                     LEFT JOIN users u ON u.telegram_id = n.user_id
                     {where}
-                    ORDER BY n.created_at DESC, n.id DESC LIMIT %s""",
-                tuple(params)
+                    ORDER BY n.created_at DESC, n.id DESC LIMIT %s OFFSET %s""",
+                tuple(params) + (limit, offset)
             )
             rows = await cur.fetchall() or []
-    for row in rows:
-        try:
-            row['payload'] = json.loads(row.get('payload') or '{}')
-        except (TypeError, ValueError):
-            row['payload'] = {}
-        for key in ('created_at', 'resolved_at', 'action_at', 'read_at'):
-            if row.get(key):
-                row[key] = str(row[key])
-    return rows
+    return [_notification_row(row) for row in rows]
+
+
+async def count_admin_notifications(status: str = None, type: str = None,
+                                    center_id: int = None, date_from: str = None,
+                                    date_to: str = None, is_read: bool = None,
+                                    action_status: str = None) -> int:
+    """Кількість подій за тими самими фільтрами (для пагінації журналу)."""
+    where, params = _notification_conditions(
+        status=status, type=type, center_id=center_id, date_from=date_from,
+        date_to=date_to, is_read=is_read, action_status=action_status,
+    )
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"SELECT COUNT(*) FROM admin_notifications n{where}", tuple(params)
+            )
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def get_admin_notification(notification_id: int):
+    """Одна подія журналу з назвами ЦН/користувача; None, якщо не знайдено."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT n.*, c.name AS center_name, u.name AS user_name
+                   FROM admin_notifications n
+                   LEFT JOIN centers c ON c.id = n.center_id
+                   LEFT JOIN users u ON u.telegram_id = n.user_id
+                   WHERE n.id = %s""",
+                (notification_id,)
+            )
+            row = await cur.fetchone()
+    return _notification_row(row) if row else None
+
+
+async def save_admin_notification_messages(notification_id: int, messages: list) -> bool:
+    """Зберігає ID надісланих у Telegram повідомлень, щоб редагувати їх на місці."""
+    if not notification_id or not messages:
+        return False
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                "SELECT payload FROM admin_notifications WHERE id = %s", (notification_id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                return False
+            try:
+                payload = json.loads(row.get('payload') or '{}')
+            except (TypeError, ValueError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload['telegram'] = messages
+            await cur.execute(
+                "UPDATE admin_notifications SET payload = %s WHERE id = %s",
+                (json.dumps(payload, ensure_ascii=False), notification_id)
+            )
+            return cur.rowcount > 0
+
+
+async def get_admin_notification_messages(notification_id: int) -> list:
+    """Повертає збережені посилання на Telegram-повідомлення події."""
+    notification = await get_admin_notification(notification_id)
+    return notification.get('telegram_messages') or [] if notification else []
 
 
 async def set_admin_notification_status(notification_id: int, status: str, actor_id: int):
@@ -2045,13 +2156,15 @@ async def close_invalid_receipt_by_user(notification_id: int, user_id: int) -> b
                 payload = {}
             payload['decision'] = 'rejected'
             payload['canceled_by_user'] = True
+            payload['canceled_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # Скасування автором — не дія адміністратора, тому action_by/resolved_by лишаються NULL.
             await cur.execute(
                 """UPDATE admin_notifications
                    SET status = 'resolved', action_status = 'rejected',
-                       action_at = NOW(), action_by = %s, resolved_at = NOW(),
-                       resolved_by = %s, payload = %s
+                       action_at = NOW(), action_by = NULL, resolved_at = NOW(),
+                       resolved_by = NULL, payload = %s
                    WHERE id = %s AND status = 'open'""",
-                (user_id, user_id, json.dumps(payload, ensure_ascii=False), notification_id)
+                (json.dumps(payload, ensure_ascii=False), notification_id)
             )
             return cur.rowcount > 0
 
@@ -2098,8 +2211,23 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
                 center_id = notification['center_id']
 
                 if decision == 'approved':
-                    user_id = int(notification['user_id'])
-                    center_id = int(center_id)
+                    user_id = notification.get('user_id')
+                    if not user_id:
+                        raise ValueError('Подія не пов\'язана з користувачем — погодити чек неможливо')
+                    user_id = int(user_id)
+                    # ЦН може бути не вказаний у самій події — тоді беремо з профілю користувача.
+                    center_id = (expense_data or {}).get('center_id') or center_id
+                    if not center_id:
+                        center_id = await get_user_center_id(user_id)
+                    if not center_id:
+                        raise ValueError(
+                            'Користувачу не призначено Центр Надії — призначте ЦН в адмін-панелі '
+                            'і погодьте документ повторно'
+                        )
+                    try:
+                        center_id = int(center_id)
+                    except (TypeError, ValueError):
+                        raise ValueError('Некоректний Центр Надії для цієї витрати')
                     amount_value = (expense_data or {}).get('amount', payload.get('amount'))
                     try:
                         amount = float(amount_value or 0)
@@ -2146,6 +2274,7 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
                 payload['decision'] = decision
                 payload['decided_by'] = int(actor_id)
                 payload['expense_id'] = expense_id
+                payload['canceled_by_user'] = False
                 await cur.execute(
                     """UPDATE admin_notifications
                        SET status = 'resolved', action_status = %s,

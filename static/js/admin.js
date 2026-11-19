@@ -360,8 +360,18 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 // ==========================================
 // ЖУРНАЛ АДМІНСЬКИХ СПОВІЩЕНЬ
 // ==========================================
-async function loadNotifications() {
-        const params = new URLSearchParams();
+const notificationsPage = { limit: 50, offset: 0, total: 0 };
+
+async function loadNotifications(resetPage = false) {
+    if (resetPage) notificationsPage.offset = 0;
+    // Якщо після зміни фільтра/статусу сторінка «випала» за межі — повертаємось на останню.
+    if (notificationsPage.total && notificationsPage.offset >= notificationsPage.total) {
+        notificationsPage.offset = Math.max(
+            0,
+            Math.floor((notificationsPage.total - 1) / notificationsPage.limit) * notificationsPage.limit
+        );
+    }
+    const params = new URLSearchParams();
     const fields = {
         status: 'notification-status', type: 'notification-type',
         is_read: 'notification-read', action_status: 'notification-action-status',
@@ -371,6 +381,8 @@ async function loadNotifications() {
         const value = document.getElementById(id)?.value;
         if (value) params.set(key, value);
     });
+    params.set('limit', notificationsPage.limit);
+    params.set('offset', notificationsPage.offset);
     const tbody = document.querySelector('#notifications-table tbody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="6">Завантаження…</td></tr>';
     const res = await fetchWithAuth(`/api/admin/notifications?${params.toString()}`);
@@ -380,6 +392,8 @@ async function loadNotifications() {
     }
     const body = await res.json();
     const rows = body.data || [];
+    notificationsPage.total = Number(body.total) || 0;
+    renderNotificationsPager(rows.length);
     if (!tbody) return;
     tbody.innerHTML = '';
     if (!rows.length) {
@@ -389,11 +403,14 @@ async function loadNotifications() {
     rows.forEach(n => {
         const tr = document.createElement('tr');
         const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс'})[n.type] || n.type;
-        const receipt = n.receipt_path ? `<a href="${cashEsc(n.receipt_path)}" target="_blank" rel="noopener">Переглянути чек</a>` : '';
+        const receipt = n.receipt_path
+            ? `<button type="button" class="btn-mini" style="background: #2196F3;" data-receipt-url="${cashEsc(n.receipt_path)}" data-receipt-title="${cashEsc('Чек: ' + (n.user_name || n.user_id || n.id))}" onclick="openReceiptFromButton(this)">📄 Переглянути чек</button>`
+            : '';
                 const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
         const actionStatus = n.action_status || (n.status === 'resolved' ? 'resolved' : 'pending');
+                const presetAmount = n.payload && n.payload.amount ? Number(n.payload.amount) : null;
         const receiptDecision = n.type === 'invalid_receipt' && actionStatus === 'pending'
-            ? `<button class="btn-mini" style="background:#2e7d32;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'approved')">Погодити</button>
+            ? `<button class="btn-mini" style="background:#2e7d32;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'approved', ${presetAmount === null ? 'null' : presetAmount})">Погодити</button>
                <button class="btn-mini" style="background:#c62828;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'rejected')">Відхилити</button>`
             : '';
         const readAction = n.read_at
@@ -404,7 +421,9 @@ async function loadNotifications() {
             : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
         const actionLabels = {pending:'Очікує рішення', approved:'Погоджено', rejected:'Відхилено', resolved:'Опрацьовано'};
         const readLabel = n.read_at ? `Прочитане${n.read_by ? ` адміністратором #${cashEsc(n.read_by)}` : ''}` : 'Непрочитане';
-        const actionLabel = actionLabels[actionStatus] || actionStatus;
+        const actionLabel = n.canceled_by_user
+            ? 'Скасовано автором'
+            : (actionLabels[actionStatus] || actionStatus);
         tr.innerHTML = `<td style="white-space:nowrap;">${cashEsc(n.created_at || '')}</td>
             <td><b>${cashEsc(typeLabel)}: ${cashEsc(n.title)}</b><div style="white-space:pre-wrap;font-size:12px;margin-top:4px;">${cashEsc(n.message)}</div>
             <div style="font-size:11px;color:#888;">${n.status === 'open' ? 'Відкрите' : 'Опрацьоване'}</div></td>
@@ -414,7 +433,32 @@ async function loadNotifications() {
     });
 }
 
-async function decideAdminReceipt(id, decision) {
+function renderNotificationsPager(rowsOnPage) {
+    const info = document.getElementById('notifications-page-info');
+    const prev = document.getElementById('notifications-prev');
+    const next = document.getElementById('notifications-next');
+    const total = notificationsPage.total;
+    if (info) {
+        if (!total) {
+            info.innerText = 'Немає записів';
+        } else {
+            const from = notificationsPage.offset + 1;
+            const to = Math.min(notificationsPage.offset + rowsOnPage, total);
+            info.innerText = `Показано ${from}–${to} з ${total}`;
+        }
+    }
+    if (prev) prev.disabled = notificationsPage.offset <= 0;
+    if (next) next.disabled = notificationsPage.offset + notificationsPage.limit >= total;
+}
+
+function notificationsPageMove(direction) {
+    const nextOffset = notificationsPage.offset + direction * notificationsPage.limit;
+    if (nextOffset < 0 || nextOffset >= notificationsPage.total) return;
+    notificationsPage.offset = nextOffset;
+    loadNotifications();
+}
+
+async function decideAdminReceipt(id, decision, presetAmount = null) {
     const promptText = decision === 'approved'
         ? 'Погодити документ і додати його як витрату?'
         : 'Відхилити цей документ?';
@@ -422,7 +466,7 @@ async function decideAdminReceipt(id, decision) {
 
     let expenseData;
     if (decision === 'approved') {
-        const amountText = prompt('Сума витрати (грн):');
+        const amountText = prompt('Сума витрати (грн):', presetAmount ? String(presetAmount) : '');
         if (amountText === null) return;
         const amount = Number(amountText.trim().replace(',', '.'));
         if (!Number.isFinite(amount) || amount <= 0) {
@@ -444,6 +488,7 @@ async function decideAdminReceipt(id, decision) {
     });
 
     if (res && res.ok) {
+        closeReceiptView();
         loadNotifications();
         return;
     }
@@ -1224,6 +1269,72 @@ async function downloadCashCsv(scope) {
 }
 
 // ==========================================
+// B4. ПЕРЕГЛЯД ЗОБРАЖЕННЯ ЧЕКА В ПОПАПІ
+// ==========================================
+const RECEIPT_VIEW_HINT = 'Клік по зображенню — масштаб 1:1. Esc або клік поза зображенням — закрити.';
+
+function receiptViewUrl(path) {
+    const raw = String(path === null || path === undefined ? '' : path).trim();
+    if (!raw) return '';
+    if (/^(https?:)?\/\//i.test(raw)) return raw;
+    return '/' + raw.replace(/^\/+/, '');
+}
+
+function openReceiptView(path, title) {
+    const url = receiptViewUrl(path);
+    if (!url) return;
+    const modal = document.getElementById('receipt-view-modal');
+    const img = document.getElementById('receipt-view-image');
+    if (!modal || !img) {
+        // Розмітки немає (стара сторінка в кеші) — не блокуємо перегляд чека
+        window.open(url, '_blank', 'noopener');
+        return;
+    }
+    const hint = document.getElementById('receipt-view-hint');
+    if (hint) hint.innerText = RECEIPT_VIEW_HINT;
+    const titleEl = document.getElementById('receipt-view-title');
+    if (titleEl) titleEl.innerText = title || 'Чек';
+    const external = document.getElementById('receipt-view-external');
+    if (external) external.href = url;
+    const scroll = document.getElementById('receipt-view-scroll');
+    if (scroll) scroll.classList.remove('zoomed');
+    img.onerror = () => {
+        if (hint) hint.innerText = 'Не вдалося завантажити зображення. Скористайтеся «Відкрити у вкладці».';
+    };
+    img.src = url;
+    modal.style.display = 'flex';
+}
+
+function openReceiptFromButton(btn) {
+    if (!btn) return;
+    openReceiptView(btn.dataset.receiptUrl, btn.dataset.receiptTitle);
+}
+
+function closeReceiptView() {
+    const modal = document.getElementById('receipt-view-modal');
+    if (modal) modal.style.display = 'none';
+    const img = document.getElementById('receipt-view-image');
+    if (img) {
+        img.onerror = null;
+        img.src = '';
+    }
+    const scroll = document.getElementById('receipt-view-scroll');
+    if (scroll) scroll.classList.remove('zoomed');
+}
+
+function onReceiptViewClick(event) {
+    const scroll = event.currentTarget;
+    if (!scroll) return;
+    if (event.target === scroll) {
+        closeReceiptView();
+        return;
+    }
+    if (event.target && event.target.id === 'receipt-view-image') {
+        scroll.classList.toggle('zoomed');
+    }
+}
+
+// ==========================================
 // F2. ЗАКРИТТЯ МОДАЛОК ПО ESC ТА КЛІКУ ПО BACKDROP
 // ==========================================
 const ADMIN_MODAL_CLOSERS = [
@@ -1231,6 +1342,7 @@ const ADMIN_MODAL_CLOSERS = [
     { id: 'category-modal', close: () => closeCategoryModal() },
     { id: 'user-modal', close: () => closeUserModal() },
         { id: 'ai-modal', close: () => closeAiModal() },
+    { id: 'receipt-view-modal', close: () => closeReceiptView() },
     { id: 'cash-settings-modal', close: () => closeCashSettingsModal() },
     { id: 'cash-op-modal', close: () => closeCashOpModal() },
     { id: 'cash-batch-modal', close: () => closeCashBatchModal() },

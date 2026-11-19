@@ -10,6 +10,7 @@ from database import (
 )
 
 from bot_setup import bot
+from telegram_notifications import update_invalid_receipt_notification
 
 from handlers.states import ReceiptState
 # Імпортуємо render_summary з receipts, оскільки вони тісно пов'язані
@@ -115,24 +116,9 @@ async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
         await callback_query.answer("Не вдалося зберегти рішення.", show_alert=True)
         return
 
-    try:
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-        outcome = (
-            f"✅ Чек погоджено та додано до витрат: {result['amount']} грн, "
-            f"{result['receipt_date']}, «{result['category']}»."
-            if decision == 'approved'
-            else "❌ Документ відхилено адміністратором."
-        )
-        if callback_query.message.photo:
-            await callback_query.message.edit_caption(
-                caption=f"{callback_query.message.caption or ''}\n\n{outcome}"
-            )
-        else:
-            await callback_query.message.edit_text(
-                f"{callback_query.message.text or ''}\n\n{outcome}"
-            )
-    except Exception:
-        pass
+    # Оновлюємо картку в усіх адміністраторів (а не лише в того, хто натиснув),
+    # щоб вони бачили однаковий актуальний стан документа.
+    await update_invalid_receipt_notification(notification_id)
 
     user_message = (
         f"✅ Адміністратор погодив документ. Витрату додано: {result['amount']} грн "
@@ -161,6 +147,8 @@ async def cancel_invalid_receipt_amount(callback_query: types.CallbackQuery, sta
     await state.clear()
     if closed:
         await callback_query.message.edit_text("🚫 Запит скасовано.")
+        # Адміністратори мають побачити, що звернення скасовано автором.
+        await update_invalid_receipt_notification(notification_id)
         await callback_query.answer("Запит скасовано.")
     else:
         await callback_query.answer("Цей запит уже закрито.", show_alert=True)

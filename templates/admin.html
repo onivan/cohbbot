@@ -33,6 +33,18 @@
         /* Компактні кнопки дій у таблицях */
         .btn-mini { background: #607D8B; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer; margin: 0 2px 2px 0; }
         .btn-mini:hover { opacity: 0.85; }
+
+        /* B4: перегляд зображення чека в попапі (масштаб у межах екрана) */
+        #receipt-view-modal { padding: 0; background: rgba(0,0,0,0.88); z-index: 200; }
+        .receipt-view-content { display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
+        .receipt-view-bar { display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: #222; color: #fff; }
+        .receipt-view-title { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .receipt-view-bar .btn-mini { text-decoration: none; display: inline-block; }
+        .receipt-view-scroll { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 8px; -webkit-overflow-scrolling: touch; }
+        .receipt-view-image { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+        .receipt-view-scroll.zoomed { align-items: flex-start; justify-content: flex-start; }
+        .receipt-view-scroll.zoomed .receipt-view-image { max-width: none; max-height: none; cursor: zoom-out; }
+        .receipt-view-hint { padding: 6px 12px 10px 12px; color: #bbb; font-size: 11px; text-align: center; }
     </style>
 </head>
 <body>
@@ -192,30 +204,35 @@
         <div id="notifications" class="tab-content">
         <p style="font-weight: bold;">Журнал подій, що потребують уваги адміністратора.</p>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:15px;">
-            <select id="notification-status" onchange="loadNotifications()" style="padding:7px;">
+            <select id="notification-status" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Усі стани</option><option value="open">Відкриті</option><option value="resolved">Опрацьовані</option>
             </select>
-                        <select id="notification-type" onchange="loadNotifications()" style="padding:7px;">
+                        <select id="notification-type" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Усі типи</option><option value="invalid_receipt">Невалідний чек</option>
                 <option value="cash_operation">Операція з коштами</option><option value="negative_balance">Мінусовий баланс</option>
             </select>
-            <select id="notification-read" onchange="loadNotifications()" style="padding:7px;">
+            <select id="notification-read" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Прочитаність: усі</option><option value="false">Непрочитані</option><option value="true">Прочитані</option>
             </select>
-            <select id="notification-action-status" onchange="loadNotifications()" style="padding:7px;">
+            <select id="notification-action-status" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Рішення: усі</option><option value="pending">Очікує рішення</option>
                 <option value="approved">Погоджено</option><option value="rejected">Відхилено</option><option value="resolved">Опрацьовано</option>
             </select>
-            <select id="notification-center" onchange="loadNotifications()" style="padding:7px;"><option value="">Усі ЦН</option></select>
-            <label>Від <input type="date" id="notification-from" onchange="loadNotifications()"></label>
-            <label>До <input type="date" id="notification-to" onchange="loadNotifications()"></label>
-            <button type="button" onclick="loadNotifications()">Оновити</button>
+            <select id="notification-center" onchange="loadNotifications(true)" style="padding:7px;"><option value="">Усі ЦН</option></select>
+            <label>Від <input type="date" id="notification-from" onchange="loadNotifications(true)"></label>
+            <label>До <input type="date" id="notification-to" onchange="loadNotifications(true)"></label>
+            <button type="button" onclick="loadNotifications(true)">Оновити</button>
         </div>
         <div style="overflow-x:auto;">
             <table id="notifications-table" style="min-width:850px;">
                                 <thead><tr><th>Дата</th><th>Тип / повідомлення</th><th>ЦН</th><th>Користувач</th><th>Рішення</th><th>Дії</th></tr></thead>
-                <tbody><tr><td colspan="6">Оберіть фільтри або оновіть журнал</td></tr></tbody>
+                                <tbody><tr><td colspan="6">Оберіть фільтри або оновіть журнал</td></tr></tbody>
             </table>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+            <button type="button" id="notifications-prev" onclick="notificationsPageMove(-1)">← Новіші</button>
+            <span id="notifications-page-info" style="font-size:12px; color:#888;">—</span>
+            <button type="button" id="notifications-next" onclick="notificationsPageMove(1)">Старіші →</button>
         </div>
     </div>
 
@@ -448,6 +465,21 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- B4: перегляд зображення чека в попапі -->
+    <div id="receipt-view-modal" class="modal" role="dialog" aria-modal="true" aria-label="Перегляд чека">
+        <div class="receipt-view-content">
+            <div class="receipt-view-bar">
+                <span id="receipt-view-title" class="receipt-view-title">Чек</span>
+                <a id="receipt-view-external" class="btn-mini" style="background: #2196F3;" href="#" target="_blank" rel="noopener">Відкрити у вкладці</a>
+                <button type="button" class="btn-mini" style="background: #f44336;" onclick="closeReceiptView()">Закрити</button>
+            </div>
+            <div id="receipt-view-scroll" class="receipt-view-scroll" onclick="onReceiptViewClick(event)">
+                <img id="receipt-view-image" class="receipt-view-image" src="" alt="Зображення чека">
+            </div>
+            <div id="receipt-view-hint" class="receipt-view-hint">Клік по зображенню — масштаб 1:1. Esc або клік поза зображенням — закрити.</div>
         </div>
     </div>
 

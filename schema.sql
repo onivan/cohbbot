@@ -186,12 +186,19 @@ CREATE TABLE IF NOT EXISTS `admin_notifications` (
     `receipt_path` TEXT NULL,
     `payload` TEXT NULL,
     `status` ENUM('open','resolved') NOT NULL DEFAULT 'open',
+    `action_status` ENUM('pending','approved','rejected','resolved') NOT NULL DEFAULT 'pending'
+        COMMENT 'pending = чекає рішення; resolved = подія без рішення',
+    `action_at` DATETIME NULL,
+    `action_by` BIGINT NULL COMMENT 'адмін, що виконав дію; NULL = дію виконав автор документа',
+    `read_at` DATETIME NULL,
+    `read_by` BIGINT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `resolved_at` DATETIME NULL,
     `resolved_by` BIGINT NULL,
     INDEX `idx_admin_notifications_status_date` (`status`, `created_at`),
     INDEX `idx_admin_notifications_type_date` (`type`, `created_at`),
-    INDEX `idx_admin_notifications_center` (`center_id`)
+    INDEX `idx_admin_notifications_center` (`center_id`),
+    INDEX `idx_admin_notifications_unread` (`read_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Базові початкові категорії

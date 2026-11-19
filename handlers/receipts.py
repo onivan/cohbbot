@@ -21,9 +21,12 @@ from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
     get_active_ai_model, create_admin_notification, set_invalid_receipt_amount,
+    get_admin_notification,
 )
 
-from telegram_notifications import notify_admins
+from telegram_notifications import (
+    notify_admins, build_invalid_receipt_caption, update_invalid_receipt_notification,
+)
 
 from ai_service import parse_receipt_image, AIServiceError
 
@@ -274,14 +277,10 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                     "Повідомимо вас про рішення."
                 )
 
-            caption = (
-                "⚠️ **Спроба надіслати невалідний чек**\n\n"
-                f"Користувач: {user_info.get('name', 'Невідомо')}\n"
-                f"ЦН: {user_info.get('center', '—')}\n"
-                f"Telegram ID: `{user_id}`\n"
-                f"Тип документа: {doc_type}\n"
-                f"Розпізнана сума: {receipt_amount if receipt_amount is not None else 'не визначена'} грн"
-            )
+            # Картка будується з самої події журналу (єдине джерело тексту),
+            # щоб її можна було коректно оновлювати на місці після дій адміна/автора.
+            notification = await get_admin_notification(notification_id) or {}
+            caption = build_invalid_receipt_caption(notification)
             await notify_admins(
                 caption,
                 user_id=user_id,
@@ -413,9 +412,6 @@ async def receive_invalid_receipt_amount(message: types.Message, state: FSMConte
 
     await state.clear()
     await message.answer("Дякую, суму передано адміністратору. Повідомимо вас про рішення.")
-    await notify_admins(
-        f"Користувач {message.from_user.full_name} ({message.from_user.id}) надав суму "
-        f"{amount:.2f} грн для документа, що очікує розгляду.",
-        user_id=message.from_user.id,
-    )
+    # Оновлюємо вже надіслану адмінам картку, а не надсилаємо друге повідомлення.
+    await update_invalid_receipt_notification(int(notification_id))
 

@@ -230,6 +230,7 @@ async def admin_get_notifications(status: Optional[str] = None, type: Optional[s
                                   date_from: Optional[str] = None, date_to: Optional[str] = None,
                                   is_read: Optional[bool] = None,
                                   action_status: Optional[str] = None,
+                                  limit: int = 100, offset: int = 0,
                                   current_user: int = Depends(get_current_user)):
     _require_admin(current_user)
     for value in (date_from, date_to):
@@ -238,12 +239,14 @@ async def admin_get_notifications(status: Optional[str] = None, type: Optional[s
                 datetime.strptime(value, "%Y-%m-%d")
             except ValueError:
                 raise HTTPException(status_code=400, detail="Дата має бути у форматі YYYY-MM-DD")
-    data = await database.list_admin_notifications(
+    filters = dict(
         status=status, type=type, center_id=center_id,
         date_from=date_from, date_to=date_to, is_read=is_read,
-        action_status=action_status
+        action_status=action_status,
     )
-    return {"status": "ok", "data": data}
+    data = await database.list_admin_notifications(**filters, limit=limit, offset=offset)
+    total = await database.count_admin_notifications(**filters)
+    return {"status": "ok", "data": data, "total": total, "limit": limit, "offset": offset}
 
 
 class AdminNotificationStatusData(BaseModel):
@@ -292,6 +295,14 @@ async def admin_decide_notification(notification_id: int, data: AdminNotificatio
         await bot.send_message(int(result["user_id"]), user_message)
     except Exception as e:
         logging.warning(f"Не вдалося повідомити користувача {result['user_id']} про рішення: {e}")
+
+    # Дзеркалимо рішення з панелі в уже надіслані Telegram-картки адміністраторів.
+    try:
+        from telegram_notifications import update_invalid_receipt_notification
+        await update_invalid_receipt_notification(notification_id)
+    except Exception as e:
+        logging.warning(f"Не вдалося оновити Telegram-картку сповіщення {notification_id}: {e}")
+
     return {"status": "ok", "data": result}
 
 
