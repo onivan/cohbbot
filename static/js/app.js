@@ -1482,6 +1482,19 @@ async function saveExpense() {
             msg_id: msgId ? parseInt(msgId) : null
         };
 
+        if (!expenseId && fileInput.files.length > 0 && urlParams.get('invalid_receipt') !== '1') {
+            const response = await fetch('/api/receipts/recognize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: currentPath })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || 'Не вдалося перевірити чек через ШІ.');
+            closeForm();
+            if (tg) tg.close();
+            return;
+        }
+
         if (urlParams.get('invalid_receipt') === '1') {
             payload.document_type = urlParams.get('document_type') || 'невідомий документ';
             const response = await fetch('/api/invalid-receipts/submit', {
