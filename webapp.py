@@ -12,6 +12,7 @@ import uuid
 import logging
 import math
 from datetime import datetime
+from urllib.parse import unquote, urlsplit
 from itsdangerous import URLSafeSerializer, BadSignature
 from config import WEBAPP_URL, SECRET_KEY
 
@@ -572,6 +573,35 @@ async def get_expenses(user_id: int, center_id: Optional[int] = None, current_us
         }
     }
 
+def _owned_receipt_url(user_id: int, supplied_url: str) -> str:
+    """Validate a receipt stored for this user and return its canonical public URL.
+
+    Telegram-originated drafts and files uploaded from the form can use different
+    hosts/URL spellings. The local URL path is authoritative; never persist an
+    arbitrary host supplied by the client.
+    """
+    url_path = unquote(urlsplit(supplied_url).path)
+    relative_path = os.path.normpath(url_path).lstrip(os.sep)
+    expected_prefix = f"receipts/{int(user_id)}/"
+    receipts_root = os.path.realpath("receipts")
+    local_path = os.path.realpath(os.path.join(os.getcwd(), relative_path))
+
+    try:
+        inside_receipts = os.path.commonpath((receipts_root, local_path)) == receipts_root
+    except ValueError:
+        inside_receipts = False
+
+    if (not relative_path.startswith(expected_prefix)
+            or not inside_receipts
+            or not os.path.isfile(local_path)):
+        raise HTTPException(
+            status_code=400,
+            detail="Прикріплений чек не знайдено або він не належить цьому обліковому запису",
+        )
+
+    return f"{WEBAPP_URL.rstrip('/')}/{relative_path}"
+
+
 @app.post("/api/invalid-receipts/submit")
 async def submit_invalid_receipt(data: InvalidReceiptSubmissionData,
                                 current_user: int = Depends(get_current_user)):
@@ -587,12 +617,12 @@ async def submit_invalid_receipt(data: InvalidReceiptSubmissionData,
 
     expense_name = (data.expense_name or "").strip()
     category_input = (data.category or "").strip()
-    receipt_path = (data.file_path or "").strip()
+    supplied_receipt_path = (data.file_path or "").strip()
     if not expense_name or not category_input:
         raise HTTPException(status_code=400, detail="Вкажіть назву витрати та категорію")
-    expected_receipt_prefix = f"{WEBAPP_URL.rstrip('/')}/receipts/{current_user}/"
-    if not receipt_path.startswith(expected_receipt_prefix):
-        raise HTTPException(status_code=400, detail="Потрібно прикріпити чек із цього облікового запису")
+    if not supplied_receipt_path:
+        raise HTTPException(status_code=400, detail="Прикріпіть чек до витрати")
+    receipt_path = _owned_receipt_url(current_user, supplied_receipt_path)
 
     center_id = await database.get_user_center_id(current_user)
     if not center_id:
