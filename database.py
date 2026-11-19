@@ -2029,6 +2029,24 @@ async def get_admin_notification(notification_id: int):
     return _notification_row(row) if row else None
 
 
+async def find_open_invalid_receipt(user_id: int, receipt_path: str):
+    """Знаходить уже поданий відкритий чек, щоб повторний запит не створив дублікат."""
+    if not user_id or not receipt_path:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT id FROM admin_notifications
+                   WHERE type = 'invalid_receipt' AND user_id = %s
+                     AND receipt_path = %s AND status = 'open'
+                   ORDER BY id DESC LIMIT 1""",
+                (user_id, receipt_path)
+            )
+            row = await cur.fetchone()
+    return int(row[0]) if row else None
+
+
 async def save_admin_notification_messages(notification_id: int, messages: list) -> bool:
     """Зберігає ID надісланих у Telegram повідомлень, щоб редагувати їх на місці."""
     if not notification_id or not messages:

@@ -1,4 +1,5 @@
 import os
+
 import io
 import asyncio
 import logging
@@ -20,13 +21,10 @@ from bot_setup import bot
 from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
-    get_active_ai_model, create_admin_notification, set_invalid_receipt_amount,
-    get_admin_notification,
+    get_active_ai_model, set_invalid_receipt_amount,
 )
 
-from telegram_notifications import (
-    notify_admins, build_invalid_receipt_caption, update_invalid_receipt_notification,
-)
+from telegram_notifications import notify_admins, update_invalid_receipt_notification
 
 from ai_service import parse_receipt_image, AIServiceError
 
@@ -61,6 +59,52 @@ async def notify_admins_ai_error(err, model_config, user_id, user_name):
     text = "\n".join(lines)
     await notify_admins(text, user_id=user_id)
 
+
+
+async def render_invalid_receipt_summary(message_obj: types.Message, data: dict, state: FSMContext):
+    """Показує результат AI для документа, який потребує перевірки адміном."""
+    date_only = data.get('receipt_date') or datetime.now().strftime('%Y-%m-%d')
+    params = {
+        'draft': '1',
+        'invalid_receipt': '1',
+        'date': date_only,
+        'amount': data.get('amount') or '',
+        'name': data.get('expense_name') or '',
+        'category': data.get('category') or '',
+        'path': data.get('file_path') or '',
+        'document_type': data.get('document_type') or 'невідомий документ',
+        'msg_id': message_obj.message_id,
+    }
+    draft_url = f"{WEBAPP_URL}?{urllib.parse.urlencode(params)}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Редагувати у формі", web_app=WebAppInfo(url=draft_url))],
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="invalid_receipt_draft_cancel")],
+    ])
+
+    amount = data.get('amount')
+    try:
+        amount_value = float(amount) if amount not in (None, '') else 0
+    except (TypeError, ValueError):
+        amount_value = 0
+    amount_text = f"{amount_value:.2f} грн" if amount_value > 0 else "не визначено"
+    date_text = data.get('receipt_date') or "не визначено"
+    date_warning = "⚠️ Дату не вдалося розпізнати — перевірте її у формі.\n" if data.get('date_not_found') else ""
+    text = (
+        "⚠️ Документ не пройшов автоматичну перевірку. Перевірте дані й відредагуйте їх за потреби.\n\n"
+        f"{date_warning}"
+        f"📅 Дата: {date_text}\n"
+        f"💰 Сума: {amount_text}\n"
+        f"🏷 Назва: {data.get('expense_name') or 'не визначено'}\n"
+        f"📂 Категорія: {data.get('category') or 'не визначено'}\n\n"
+        "Після збереження у формі документ буде передано адміністратору на перевірку. "
+        "Витрата з’явиться у звіті лише після погодження."
+    )
+    await state.set_state(ReceiptState.waiting_for_confirmation)
+    await state.update_data(invalid_receipt_draft=True, local_fs_path=data.get('local_fs_path'))
+    if message_obj.from_user.is_bot:
+        await message_obj.edit_text(text, reply_markup=kb)
+    else:
+        await message_obj.answer(text, reply_markup=kb)
 
 
 async def render_summary(message_obj: types.Message, data: dict, state: FSMContext):
@@ -116,6 +160,11 @@ async def render_summary(message_obj: types.Message, data: dict, state: FSMConte
 @router.message(F.photo)
 async def process_receipt_photo(message: types.Message, state: FSMContext):
     """Обробка фото чека: розпізнавання, збереження та підготовка до підтвердження"""
+
+    current_state_data = await state.get_data()
+    if current_state_data.get('invalid_receipt_draft'):
+        await message.answer("Спочатку надішліть документ на перевірку або скасуйте поточну чернетку.")
+        return
 
     if await state.get_state() == ReceiptState.waiting_for_invalid_receipt_amount.state:
         await message.answer("Спочатку надішліть суму витрати або скасуйте запит кнопкою під повідомленням.")
@@ -217,8 +266,6 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
 
         if not data.get('is_receipt', True):
             doc_type = (data.get('document_type') or 'невідомий документ').strip()
-            user_info = users_cache.get(user_id_str, {'name': 'Невідомо', 'center': '—'})
-            center_id = user_info.get('center_id')
             receipt_path = None
             try:
                 now = datetime.now()
@@ -237,57 +284,26 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
             except (TypeError, ValueError):
                 receipt_amount = None
 
-            notification_id = await create_admin_notification(
-                type='invalid_receipt',
-                title='Спроба надіслати невалідний чек',
-                message=(
-                    f"Користувач: {user_info.get('name', 'Невідомо')} ({user_id})\n"
-                    f"ЦН: {user_info.get('center', '—')}\nТип документа: {doc_type}"
-                ),
-                center_id=int(center_id) if center_id else None,
-                user_id=user_id,
-                receipt_path=receipt_path,
-                payload={
-                    'document_type': doc_type,
-                    'source': 'telegram',
-                    'amount': receipt_amount,
-                    'amount_missing': receipt_amount is None,
-                    'receipt_date': data.get('receipt_date'),
-                    'expense_name': data.get('expense_name'),
-                    'category': data.get('category'),
-                }
-            )
+            try:
+                parsed_date = str(data.get('receipt_date') or '').strip()[:10]
+                if parsed_date:
+                    datetime.strptime(parsed_date, '%Y-%m-%d')
+                else:
+                    parsed_date = None
+            except ValueError:
+                parsed_date = None
 
-            if receipt_amount is None:
-                await state.update_data(invalid_receipt_notification_id=notification_id)
-                await state.set_state(ReceiptState.waiting_for_invalid_receipt_amount)
-                cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-                    text="Скасувати",
-                    callback_data=f"invalid_receipt_cancel:{notification_id}",
-                )]])
-                await msg.edit_text(
-                    "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n\n"
-                    "Не вдалося визначити суму. Надішліть, будь ласка, суму витрати числом "
-                    "(наприклад, 1250,50 грн), щоб адміністратор міг додати її до витрат.",
-                    reply_markup=cancel_kb,
-                )
-            else:
-                await msg.edit_text(
-                    "❌ Документ не пройшов автоматичну перевірку. Його передано адміністратору на розгляд.\n"
-                    "Повідомимо вас про рішення."
-                )
-
-            # Картка будується з самої події журналу (єдине джерело тексту),
-            # щоб її можна було коректно оновлювати на місці після дій адміна/автора.
-            notification = await get_admin_notification(notification_id) or {}
-            caption = build_invalid_receipt_caption(notification)
-            await notify_admins(
-                caption,
-                user_id=user_id,
-                photo=photo.file_id,
-                parse_mode="Markdown",
-                notification_id=notification_id,
-            )
+            invalid_data = {
+                'amount': receipt_amount,
+                'expense_name': data.get('expense_name') or '',
+                'category': data.get('category') or '',
+                'receipt_date': parsed_date,
+                'document_type': doc_type,
+                'file_path': receipt_path,
+                'local_fs_path': local_path if receipt_path else None,
+                'date_not_found': parsed_date is None,
+            }
+            await render_invalid_receipt_summary(msg, invalid_data, state)
             return
 
         amount = data['amount']

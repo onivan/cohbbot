@@ -1444,58 +1444,79 @@ function closeForm() { document.getElementById('modal').style.display = 'none'; 
 function closeMyBudgetModal() { document.getElementById('my-budget-modal').style.display = 'none'; }
 function closeSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
 
+let isSavingExpense = false;
+
 async function saveExpense() {
-    const fileInput = document.getElementById('f-file');
-    let currentPath = document.getElementById('f-path').value;
-    
-    if (fileInput.files.length > 0) {
-        const formData = new FormData();
-        formData.append("file", fileInput.files[0]);
-        try {
+    if (isSavingExpense) return;
+    isSavingExpense = true;
+    const saveButton = document.querySelector('.modal-actions-top button[onclick="saveExpense()"]');
+    if (saveButton) saveButton.disabled = true;
+
+    try {
+        const fileInput = document.getElementById('f-file');
+        let currentPath = document.getElementById('f-path').value;
+
+        if (fileInput.files.length > 0) {
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
             const uploadRes = await fetch(`/api/upload/${userId}`, { method: "POST", body: formData });
             const uploadData = await uploadRes.json();
-            if (uploadData.status === "ok") currentPath = uploadData.file_path;
-        } catch (err) {
-            alert("Помилка під час завантаження чека.");
+            if (!uploadRes.ok || uploadData.status !== "ok") {
+                throw new Error(uploadData.detail || "Не вдалося завантажити чек.");
+            }
+            currentPath = uploadData.file_path;
+        }
+
+        const expenseId = document.getElementById('f-expense-id').value;
+        const hryvnia = parseInt(document.getElementById('f-hryvnia').value) || 0;
+        const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
+        const totalAmount = hryvnia + (kopeck / 100);
+        const msgId = urlParams.get('msg_id');
+        const selectedCategoryId = document.getElementById('f-category').value;
+        const payload = {
+            date: document.getElementById('f-date').value,
+            amount: totalAmount,
+            expense_name: document.getElementById('f-name').value,
+            category: selectedCategoryId,
+            file_path: currentPath,
+            msg_id: msgId ? parseInt(msgId) : null
+        };
+
+        if (urlParams.get('invalid_receipt') === '1') {
+            payload.document_type = urlParams.get('document_type') || 'невідомий документ';
+            const response = await fetch('/api/invalid-receipts/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || 'Не вдалося передати документ адміністратору.');
+            closeForm();
+            if (tg) tg.close();
             return;
         }
-    }
 
-    const expenseId = document.getElementById('f-expense-id').value;
-    const hryvnia = parseInt(document.getElementById('f-hryvnia').value) || 0;
-    const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
-    const totalAmount = hryvnia + (kopeck / 100);
-
-    const msgId = urlParams.get('msg_id');
-    const selectedCategoryId = document.getElementById('f-category').value;
-
-    const payload = {
-        date: document.getElementById('f-date').value,
-        amount: totalAmount,
-        expense_name: document.getElementById('f-name').value,
-        category: selectedCategoryId,
-        file_path: currentPath,
-        msg_id: msgId ? parseInt(msgId) : null
-    };
-    
-    const method = expenseId ? 'PUT' : 'POST';
-    const url = expenseId ? `/api/expenses/${userId}/${expenseId}` : `/api/expenses/${userId}`;
-    
-    fetch(url, {
-        method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    }).then(r => {
-        if (!r.ok) { alert("Помилка збереження! Можливо, ви намагаєтеся відредагувати чужий запис."); return; }
+        const method = expenseId ? 'PUT' : 'POST';
+        const url = expenseId ? `/api/expenses/${userId}/${expenseId}` : `/api/expenses/${userId}`;
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Помилка збереження витрати.');
         closeForm();
-        // Якщо адмін був на «зведенні» — перемикаємось на свій ЦН, щоб побачити щойно додану витрату
         if (isAdminSummaryMode() && currentUserCenterId) {
             const centerFilter = document.getElementById('main-center-filter');
             if (centerFilter) centerFilter.value = String(currentUserCenterId);
         }
         loadExpenses(expenseId);
-        if (urlParams.get('draft') === '1') tg.close();
-    });
+        if (urlParams.get('draft') === '1' && tg) tg.close();
+    } catch (err) {
+        alert(err.message || 'Не вдалося зберегти дані.');
+    } finally {
+        isSavingExpense = false;
+        if (saveButton) saveButton.disabled = false;
+    }
 }
 
 function deleteExpense(expenseId) {

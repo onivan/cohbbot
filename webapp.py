@@ -10,6 +10,7 @@ import io
 import os
 import uuid
 import logging
+import math
 from datetime import datetime
 from itsdangerous import URLSafeSerializer, BadSignature
 from config import WEBAPP_URL, SECRET_KEY
@@ -92,6 +93,10 @@ class ExpenseData(BaseModel):
     category: str  # Зберігає category_id або назву
     file_path: Optional[str] = ""
     msg_id: Optional[int] = None
+
+
+class InvalidReceiptSubmissionData(ExpenseData):
+    document_type: str = "невідомий документ"
 
 class CenterCreationData(BaseModel):
     name: str
@@ -536,7 +541,7 @@ async def upload_receipt(user_id: int, file: UploadFile = File(...), current_use
     with open(local_path, "wb") as buffer:
         buffer.write(await file.read())
         
-    file_url = f"{WEBAPP_URL}/{local_path}"
+    file_url = f"{WEBAPP_URL.rstrip('/')}/{local_path.lstrip('/')}"
     return {"status": "ok", "file_path": file_url}
 
 
@@ -566,6 +571,107 @@ async def get_expenses(user_id: int, center_id: Optional[int] = None, current_us
             "keys": list(first_exp.keys()) if first_exp else []
         }
     }
+
+@app.post("/api/invalid-receipts/submit")
+async def submit_invalid_receipt(data: InvalidReceiptSubmissionData,
+                                current_user: int = Depends(get_current_user)):
+    """Передає виправлений невалідний чек адмінам, не створюючи витрату."""
+    amount = float(data.amount)
+    if not math.isfinite(amount) or amount <= 0:
+        raise HTTPException(status_code=400, detail="Сума має бути більшою за нуль")
+
+    try:
+        receipt_date = datetime.strptime(data.date, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Дата має бути у форматі YYYY-MM-DD")
+
+    expense_name = (data.expense_name or "").strip()
+    category_input = (data.category or "").strip()
+    receipt_path = (data.file_path or "").strip()
+    if not expense_name or not category_input:
+        raise HTTPException(status_code=400, detail="Вкажіть назву витрати та категорію")
+    expected_receipt_prefix = f"{WEBAPP_URL.rstrip('/')}/receipts/{current_user}/"
+    if not receipt_path.startswith(expected_receipt_prefix):
+        raise HTTPException(status_code=400, detail="Потрібно прикріпити чек із цього облікового запису")
+
+    center_id = await database.get_user_center_id(current_user)
+    if not center_id:
+        raise HTTPException(status_code=400, detail="Користувачу не призначено Центр Надії")
+
+    # Повторне надсилання з того самого чека повертає наявне звернення.
+    existing_id = await database.find_open_invalid_receipt(current_user, receipt_path)
+    if existing_id:
+        notification_id = existing_id
+    else:
+        categories = await database.get_categories(current_user)
+        category_name = next((
+            str(cat.get("name")) for cat in categories
+            if isinstance(cat, dict) and str(cat.get("id")) == category_input
+        ), category_input)
+        user_info = database.users_cache.get(str(current_user), {})
+        document_type = (data.document_type or "невідомий документ").strip()[:191]
+        message = (
+            f"Користувач: {user_info.get('name', 'Невідомо')} ({current_user})\n"
+            f"ЦН: {user_info.get('center', '—')}\nТип документа: {document_type}\n"
+            f"Дата: {receipt_date}\nСума: {amount:.2f} грн\n"
+            f"Назва: {expense_name}\nКатегорія: {category_name}"
+        )
+        notification_id = await database.create_admin_notification(
+            type="invalid_receipt",
+            title="Невалідний чек — потрібне рішення адміністратора",
+            message=message,
+            center_id=int(center_id),
+            user_id=current_user,
+            receipt_path=receipt_path,
+            payload={
+                "document_type": document_type,
+                "source": "webapp_invalid_receipt",
+                "amount": round(amount, 2),
+                "amount_missing": False,
+                "receipt_date": receipt_date,
+                "expense_name": expense_name,
+                "category": category_name,
+            },
+        )
+
+    notification = await database.get_admin_notification(notification_id) or {}
+    if not notification.get("telegram_messages"):
+        try:
+            from telegram_notifications import build_invalid_receipt_caption, notify_admins
+            await notify_admins(
+                build_invalid_receipt_caption(notification),
+                user_id=current_user,
+                photo=receipt_path,
+                parse_mode="Markdown",
+                notification_id=notification_id,
+            )
+        except Exception as e:
+            logging.exception("Не вдалося надіслати картку невалідного чека адміну: %s", e)
+
+    # Прибираємо кнопки з чернетки та очищаємо FSM незалежно від помилки Telegram API.
+    if data.msg_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=current_user,
+                message_id=data.msg_id,
+                text="📨 Документ передано адміністратору на перевірку. Витрата з’явиться після погодження.",
+            )
+        except Exception as e:
+            logging.info("Не вдалося оновити Telegram-чернетку користувача %s: %s", current_user, e)
+    try:
+        from bot_setup import dp
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+        state = FSMContext(
+            storage=dp.storage,
+            key=StorageKey(bot_id=bot.id, chat_id=current_user, user_id=current_user),
+        )
+        await state.clear()
+    except Exception as e:
+        logging.info("Не вдалося очистити FSM користувача %s: %s", current_user, e)
+
+    return {"status": "ok", "notification_id": notification_id}
+
 
 @app.post("/api/expenses/{user_id}")
 async def create_expense(user_id: int, data: ExpenseData, current_user: int = Depends(get_current_user)):

@@ -137,7 +137,10 @@ def build_invalid_receipt_caption(notification: dict) -> str:
         f"ЦН: {_md_escape(notification.get('center_name') or '—')}",
         f"Telegram ID: `{notification.get('user_id')}`",
         f"Тип документа: {_md_escape(payload.get('document_type') or '—')}",
+        f"Дата: {_md_escape(payload.get('receipt_date') or '—')}",
         f"Сума: {amount_line}",
+        f"Назва: {_md_escape(payload.get('expense_name') or '—')}",
+        f"Категорія: {_md_escape(payload.get('category') or '—')}",
     ]
     if notification.get('receipt_path'):
         lines.append(f"[Відкрити чек у панелі]({notification['receipt_path']})")

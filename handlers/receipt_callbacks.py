@@ -85,6 +85,22 @@ async def process_callback(callback_query: types.CallbackQuery, state: FSMContex
 
 
 
+@router.callback_query(F.data == "invalid_receipt_draft_cancel", ReceiptState.waiting_for_confirmation)
+async def cancel_invalid_receipt_draft(callback_query: types.CallbackQuery, state: FSMContext):
+    """Скасовує чернетку невалідного документа до відправлення адміністратору."""
+    data = await state.get_data()
+    local_path = data.get('local_fs_path')
+    if local_path:
+        try:
+            if await asyncio.to_thread(os.path.exists, local_path):
+                await asyncio.to_thread(os.remove, local_path)
+        except OSError:
+            pass
+    await state.clear()
+    await callback_query.message.edit_text("🚫 Документ скасовано. Адміністратора не повідомляли.")
+    await callback_query.answer("Документ скасовано.")
+
+
 @router.callback_query(F.data.startswith("invalid_receipt:"))
 async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
     """Обробляє рішення адміністратора щодо документа."""
