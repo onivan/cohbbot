@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: ACTIVE
+- state: FREE
 - owner: —
 - task: —
-- branch: dev
-- since: 2026-11-19T21:15:40Z
-- note: A4 закомічено локально (`f01a3f7`); staging-деплой та наскрізна перевірка очікують користувача
+- branch: —
+- since: —
+- note: —
 
 ---
 
@@ -128,3 +128,9 @@
 - Перевірки локально: `py_compile webapp.py`, `node --check static/js/app.js`, `git diff --check` пройшли. Runtime/staging-тест не виконано: у локальному оточенні відсутні `aiogram`, `fastapi` та `aiohttp`.
 - Деплой не виконано. Ручний acceptance: staging-деплой, завантажити коректний чек і перевірити AI-картку/редагування/збереження; завантажити не-чек і пройти A3-подання до адміністратора.
 - Наступний крок: користувач запускає `./deploy.sh`, перевіряє `make status` і `make test`, потім виконує обидва Telegram-сценарії; врахувати H2 (`SECRET_KEY`).
+
+### 2026-11-19T22:39Z · ws-ubuntu → передача (A4)
+- Коміти: `f01a3f7` (реалізація A4), `e2a2d49` (попередній запис передачі); локальні перевірки `py_compile`, `node --check static/js/app.js`, `git diff --check` пройшли.
+- Деплой і runtime/staging-тести не виконувались; локально відсутні `aiogram`, `fastapi`, `aiohttp`.
+- Ручні кроки: `./deploy.sh`, `make status`, `make test`; пройти Telegram acceptance для валідного чека та не-чека/A3. Врахувати H2 (`SECRET_KEY`).
+- Наступний крок: staging-перевірка A4; після неї вибрати наступну задачу з TODO. Лок звільнено.
