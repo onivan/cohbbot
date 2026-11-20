@@ -9,9 +9,9 @@
 - state: BUSY
 - owner: ws-windows
 - task: A4 (inline Web App recognition)
-- branch: feat/a4-inline-recognition
+- branch: dev
 - since: 2026-11-20T08:02:24Z
-- note: Replace Telegram FSM handoff with immediate inline recognition, editable fields, and invalid-document review submission.
+- note: A4 merged into dev at a923fde; awaiting staging tests/deploy and manual acceptance.
 
 
 
@@ -144,3 +144,9 @@
 - Додано аналіз-пункти 25–26 та A5: загальна/середня вартість AI-розпізнавання й відсотки валідного розпізнавання чека та окремих полів на сторінці «ШІ-моделі».
 - Перевірка `git diff --check` пройшла. Лише документаційні зміни; код, тести й деплой не зачіпались.
 - A4 staging verification відкладена; наступний крок — продовжити зі staging-перевірки A4 або взяти відкриту задачу з TODO.
+
+### 2026-11-20T11:02Z · A4 · інтеграція у dev · ws-windows
+- Merge-коміт `a923fde` (`Show AI receipt recognition in web form`) інтегрує гілку `feat/a4-inline-recognition` у `dev`.
+- Локальні перевірки: `node --check static/js/app.js`, Python AST parse для `webapp.py`, `git diff --check` пройшли.
+- Staging-тести/деплой ще не виконані: у середовищі немає `make`; feature acceptance лишається очікуваним.
+- Наступний крок: запустити `make test`, задеплоїти `dev` через `./deploy.sh` і вручну пройти сценарії валідного чека та не-чека.
