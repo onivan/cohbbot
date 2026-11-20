@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: A4 follow-up compile fix is pushed; staging deploy and acceptance are still pending with the user.
+- state: BUSY
+- owner: ws-ubuntu
+- task: A4 mobile upload identity
+- branch: dev
+- since: 2026-11-20T16:38:35Z
+- note: Investigating Telegram WebApp mobile upload identity mismatch; will use authenticated Telegram initData to avoid stale browser cookie identity.
 
 
 
