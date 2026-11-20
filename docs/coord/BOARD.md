@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: Handoff recorded; continue A4 follow-up on the next workstation.
+- state: BUSY
+- owner: ws-ubuntu
+- task: A4 follow-up
+- branch: dev
+- since: 2026-11-20T15:45:30Z
+- note: Reviewing the latest inline-recognition integration and validating A4 locally; staging deployment/acceptance remains with the user.
 
 
 
