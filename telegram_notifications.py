@@ -260,14 +260,14 @@ async def finalize_invalid_receipt_notification(
                 f"у чаті {chat_id}: {e}"
             )
 
-            try:
+    try:
         fallback_message_id = int(actor_message_id) if actor_message_id is not None else None
     except (TypeError, ValueError):
         fallback_message_id = None
     if fallback_message_id is not None and fallback_message_id not in deleted_message_ids:
         try:
             await bot.delete_message(
-                chat_id=actor_id, message_id=fallback_message_id
+            chat_id=actor_id, message_id=fallback_message_id
             )
         except Exception as e:
             logging.info(
