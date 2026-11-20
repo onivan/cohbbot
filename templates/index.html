@@ -81,7 +81,7 @@
         <div class="modal-content">
             <div class="modal-actions-top">
                 <button class="btn-danger" onclick="closeForm()">Скасувати</button>
-                <button onclick="saveExpense()">Зберегти</button>
+                <button id="btn-save-expense" onclick="saveExpense()">Зберегти</button>
             </div>
             <div id="modal-nav-box" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <button type="button" id="btn-prev" class="btn-sm" onclick="navExpense(-1)">⬅️ Попередня</button>
@@ -109,7 +109,8 @@
                     <button type="button" class="receipt-btn" style="background-color: #4CAF50;" onclick="viewAttachedReceipt()">📄 Переглянути чек</button>
                     <button type="button" class="btn-sm btn-danger" onclick="removeAttachedReceipt()">❌ Видалити</button>
                 </div>
-                <input type="file" id="f-file" accept="image/*">
+                <input type="file" id="f-file" accept="image/*" onchange="onReceiptFileSelected()">
+                <div id="receipt-ai-status" role="status" aria-live="polite" style="display: none; margin-top: 8px; padding: 9px; border-radius: 6px; font-size: 0.9em;"></div>
             </div>
         </div>
     </div>
