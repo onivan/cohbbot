@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: A4 (inline Web App recognition)
+- branch: feat/a4-inline-recognition
+- since: 2026-11-20T08:02:24Z
+- note: Replace Telegram FSM handoff with immediate inline recognition, editable fields, and invalid-document review submission.
 
 
 
