@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: A4 follow-up
-- branch: dev
-- since: 2026-11-20T15:45:30Z
-- note: Reviewing the latest inline-recognition integration and validating A4 locally; staging deployment/acceptance remains with the user.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: A4 follow-up compile fix is pushed; staging deploy and acceptance are still pending with the user.
 
 
 
@@ -156,4 +156,13 @@
 - Перевірки: `py_compile` не пройшов через відступ у `telegram_notifications.py`; `git diff --check` попереджає про порожній рядок у кінці цього файла. Виправлень у цій передачі не робити.
 - Staging-тести, деплой і ручний acceptance не виконані.
 - Наступний крок на іншій воркстанції: перевірити/виправити передані зміни, пройти локальні та staging-перевірки й завершити A4 acceptance.
+- Лок звільнено.
+
+### 2026-11-20T16:25Z · A4 follow-up · ws-ubuntu → передача
+- Після `git pull --ff-only origin dev` (`9ac94cc`) захоплено лок, переглянуто інтеграцію inline-розпізнавання A4.
+- Виправлено синтаксичну помилку відступу в `telegram_notifications.finalize_invalid_receipt_notification()` (переданий `telegram_notifications.py` не проходив `py_compile`): резервне видалення Telegram-картки тепер розташоване поза `except`, як задумано. Коміт `d057946` (`fix(notifications): repair finalized receipt card cleanup`) запушений у `origin/dev`.
+- Перевірки: `py_compile` для `webapp.py`, `ai_service.py`, `handlers/receipt_callbacks.py`, `telegram_notifications.py`; `node --check static/js/app.js`; `git diff --check` — пройшли.
+- Деплой, staging-тести й ручна A4/A3 acceptance не виконувались.
+- Ручні кроки: користувачу задеплоїти через `./deploy.sh`, перевірити `make status` і `make test`; пройти валідний чек у Web App, не-чек → A3-подання без автозбереження витрати, а також Telegram approve/reject і перевірити видалення картки адміністратора. Врахувати H2 (`SECRET_KEY` може скидати сесії після рестарту).
+- Наступний крок: завершити staging acceptance A4/A3, потім захопити A5 (вартість і якість AI-розпізнавання).
 - Лок звільнено.
