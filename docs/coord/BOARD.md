@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-windows
-- task: A4 (inline Web App recognition)
-- branch: dev
-- since: 2026-11-20T08:02:24Z
-- note: A4 merged into dev at a923fde; awaiting staging tests/deploy and manual acceptance.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: Handoff recorded; continue A4 follow-up on the next workstation.
 
 
 
@@ -150,3 +150,10 @@
 - Локальні перевірки: `node --check static/js/app.js`, Python AST parse для `webapp.py`, `git diff --check` пройшли.
 - Staging-тести/деплой ще не виконані: у середовищі немає `make`; feature acceptance лишається очікуваним.
 - Наступний крок: запустити `make test`, задеплоїти `dev` через `./deploy.sh` і вручну пройти сценарії валідного чека та не-чека.
+
+### 2026-11-20T12:35Z · A4 · ws-windows → передача
+- Поточні зміни в `telegram_notifications.py`, `handlers/receipt_callbacks.py` і `webapp.py` передаються як є окремим комітом у `dev`; запушити в `origin/dev`.
+- Перевірки: `py_compile` не пройшов через відступ у `telegram_notifications.py`; `git diff --check` попереджає про порожній рядок у кінці цього файла. Виправлень у цій передачі не робити.
+- Staging-тести, деплой і ручний acceptance не виконані.
+- Наступний крок на іншій воркстанції: перевірити/виправити передані зміни, пройти локальні та staging-перевірки й завершити A4 acceptance.
+- Лок звільнено.

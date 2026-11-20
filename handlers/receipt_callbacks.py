@@ -10,7 +10,11 @@ from database import (
 )
 
 from bot_setup import bot
-from telegram_notifications import update_invalid_receipt_notification
+from telegram_notifications import (
+    finalize_invalid_receipt_notification,
+    update_invalid_receipt_notification,
+)
+
 
 from handlers.states import ReceiptState
 # Імпортуємо render_summary з receipts, оскільки вони тісно пов'язані
@@ -132,13 +136,17 @@ async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
         await callback_query.answer("Не вдалося зберегти рішення.", show_alert=True)
         return
 
-    # Оновлюємо картку в усіх адміністраторів (а не лише в того, хто натиснув),
-    # щоб вони бачили однаковий актуальний стан документа.
-    await update_invalid_receipt_notification(notification_id)
+                    # Видаляємо картку в адміна, який ухвалив рішення, та оновлюємо її в інших.
+
+    await finalize_invalid_receipt_notification(
+        notification_id,
+        actor_id=user_id,
+        actor_message_id=getattr(callback_query.message, 'message_id', None),
+    )
 
     user_message = (
         f"✅ Адміністратор погодив документ. Витрату додано: {result['amount']} грн "
-        f"за {result['receipt_date']}."
+                f"за {result['receipt_date']}."
         if decision == 'approved'
         else "❌ Адміністратор переглянув документ, але не погодив його як витрату."
     )
@@ -150,7 +158,6 @@ async def decide_invalid_receipt_callback(callback_query: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("invalid_receipt_cancel:"), ReceiptState.waiting_for_invalid_receipt_amount)
-
 async def cancel_invalid_receipt_amount(callback_query: types.CallbackQuery, state: FSMContext):
     """Дозволяє автору відмовитися від передачі документа на розгляд."""
     try:

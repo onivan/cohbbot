@@ -301,20 +301,22 @@ async def admin_decide_notification(notification_id: int, data: AdminNotificatio
         f"✅ Адміністратор погодив документ. Витрату додано: {result['amount']} грн за {result['receipt_date']}."
         if data.decision == "approved"
         else "❌ Адміністратор переглянув документ, але не погодив його як витрату."
-    )
+        )
     try:
         await bot.send_message(int(result["user_id"]), user_message)
-    except Exception as e:
-        logging.warning(f"Не вдалося повідомити користувача {result['user_id']} про рішення: {e}")
 
-    # Дзеркалимо рішення з панелі в уже надіслані Telegram-картки адміністраторів.
+    except Exception as e:
+                logging.warning(f"Не вдалося повідомити користувача {result['user_id']} про рішення: {e}")
+
+    # Прибираємо картку в адміна, який ухвалив рішення; іншим лишаємо
+    # оновлений статус без кнопок. Помилка Telegram не скасовує рішення.
     try:
-        from telegram_notifications import update_invalid_receipt_notification
-        await update_invalid_receipt_notification(notification_id)
+        from telegram_notifications import finalize_invalid_receipt_notification
+        await finalize_invalid_receipt_notification(notification_id, actor_id=current_user)
     except Exception as e:
-        logging.warning(f"Не вдалося оновити Telegram-картку сповіщення {notification_id}: {e}")
+        logging.warning(f"Не вдалося завершити Telegram-картку сповіщення {notification_id}: {e}")
 
-    return {"status": "ok", "data": result}
+        return {"status": "ok", "data": result}
 
 
 @app.put("/api/admin/notifications/{notification_id}/read")

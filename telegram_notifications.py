@@ -45,9 +45,8 @@ def admin_notification_keyboard(user_id=None, notification_id=None, can_approve=
 
     if WEBAPP_URL:
         rows.append([
-            InlineKeyboardButton(
+                        InlineKeyboardButton(
                 text="📋 Відкрити адмін-панель",
-
                 url=f"{WEBAPP_URL.rstrip('/')}/admin",
             )
         ])
@@ -161,9 +160,8 @@ def build_invalid_receipt_caption(notification: dict) -> str:
 async def update_invalid_receipt_notification(notification_id: int) -> bool:
     """Оновлює вже надіслані адмінам картки чека (без нових повідомлень).
 
-    Викликається після будь-якої зміни стану події: користувач надав суму,
-    адміністратор погодив/відхилив, автор скасував звернення. Будь-яка
-    помилка Telegram не повинна ламати основну операцію.
+    Викликається після зміни стану події, крім рішення адміністратора.
+    Будь-яка помилка Telegram не повинна ламати основну операцію.
     """
     try:
         notification = await database.get_admin_notification(int(notification_id))
@@ -203,3 +201,82 @@ async def update_invalid_receipt_notification(notification_id: int) -> bool:
                 f"Картку сповіщення {notification_id} не оновлено у чаті {chat_id}: {e}"
             )
     return True
+
+
+async def finalize_invalid_receipt_notification(
+        notification_id: int, actor_id: int, actor_message_id: int = None) -> bool:
+    """Видаляє картку в адміна, який ухвалив рішення, та оновлює картки інших.
+
+    Рішення вже має бути збережене в БД. Помилки Telegram логуються, але не
+    впливають на результат рішення. ``actor_message_id`` є страховкою для
+    Telegram callback, якщо посилання на повідомлення ще не збережене в БД.
+    """
+    try:
+        notification = await database.get_admin_notification(int(notification_id))
+    except Exception as e:
+        logging.error(f"Не вдалося прочитати сповіщення {notification_id}: {e}")
+        return False
+    if not notification or notification.get('type') != 'invalid_receipt':
+        return False
+
+    payload = notification.get('payload') or {}
+    if payload.get('decision') not in ('approved', 'rejected'):
+        return False
+
+    try:
+        caption = build_invalid_receipt_caption(notification)
+        actor_id = int(actor_id)
+    except (TypeError, ValueError, KeyError) as e:
+        logging.error(f"Некоректні дані для картки сповіщення {notification_id}: {e}")
+        return False
+
+    deleted_message_ids = set()
+    for ref in notification.get('telegram_messages') or []:
+        try:
+            chat_id = int(ref.get('chat_id'))
+            message_id = int(ref.get('message_id'))
+        except (TypeError, ValueError, AttributeError):
+            continue
+
+        is_actor = chat_id == actor_id
+        try:
+            if is_actor:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+                deleted_message_ids.add(message_id)
+            elif ref.get('kind') == 'photo':
+                await bot.edit_message_caption(
+                    chat_id=chat_id, message_id=message_id, caption=caption,
+                    parse_mode='Markdown', reply_markup=None,
+                )
+            else:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id, text=caption,
+                    parse_mode='Markdown', reply_markup=None,
+                )
+        except Exception as e:
+            action = 'видалити' if is_actor else 'оновити'
+            logging.info(
+                f"Не вдалося {action} картку сповіщення {notification_id} "
+                f"у чаті {chat_id}: {e}"
+            )
+
+            try:
+        fallback_message_id = int(actor_message_id) if actor_message_id is not None else None
+    except (TypeError, ValueError):
+        fallback_message_id = None
+    if fallback_message_id is not None and fallback_message_id not in deleted_message_ids:
+        try:
+            await bot.delete_message(
+                chat_id=actor_id, message_id=fallback_message_id
+            )
+        except Exception as e:
+            logging.info(
+                f"Не вдалося видалити картку сповіщення {notification_id} "
+                f"у чаті адміністратора {actor_id}: {e}"
+            )
+    return True
+
+
+
+
+
