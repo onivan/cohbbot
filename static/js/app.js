@@ -170,7 +170,7 @@ function getBudgetCenterId() {
 
 // Кнопки дій: додавати витрати можна лише у свій ЦН
 function updateActionButtons() {
-        const btnAdd = document.getElementById('btn-add-expense');
+    const btnAdd = document.getElementById('btn-add-expense');
     const btnBudget = document.getElementById('btn-my-budget');
     const btnCash = document.getElementById('btn-my-cash');
     const hasOwnCenter = !!currentUserCenterId;
@@ -382,7 +382,7 @@ function openMyBudgetModal() {
     const centerFilter = document.getElementById('main-center-filter');
     const titleEl = document.getElementById('my-budget-title');
     if (centerFilter && centerFilter.value && centerFilter.value !== "0" && currentUserRole === 'admin') {
-                const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text.replace(/ ⭐/g, '') : '';
+        const centerName = centerFilter.options[centerFilter.selectedIndex] ? centerFilter.options[centerFilter.selectedIndex].text.replace(/ ⭐/g, '') : '';
         if (titleEl) titleEl.textContent = `Ліміти ЦН ${centerName}`;
     } else {
         fetch(`/api/user/${userId}/center`)
@@ -1233,7 +1233,125 @@ function closeReceipt() {
     document.getElementById('receipt-image').src = '';
 }
 
+let receiptRecognitionComplete = false;
+let receiptRecognitionInProgress = false;
+let recognizedNonReceipt = false;
+let recognizedDocumentType = 'невідомий документ';
+let uploadedReceiptFile = null;
+let recognitionCategoryId = '';
+
+function setReceiptAiStatus(message, kind = 'info') {
+    const status = document.getElementById('receipt-ai-status');
+    if (!status) return;
+    status.textContent = message;
+    status.style.display = message ? 'block' : 'none';
+    status.style.background = kind === 'error' ? '#ffebee' : kind === 'warning' ? '#fff3cd' : '#e8f5e9';
+    status.style.color = kind === 'error' ? '#b71c1c' : kind === 'warning' ? '#795548' : '#1b5e20';
+}
+
+function updateExpenseSaveButton() {
+    const button = document.getElementById('btn-save-expense');
+    if (button) {
+        button.textContent = (recognizedNonReceipt || urlParams.get('invalid_receipt') === '1')
+            ? 'Передати адміну'
+            : 'Зберегти';
+    }
+}
+
+async function onReceiptFileSelected() {
+    const fileInput = document.getElementById('f-file');
+    const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    if (!file || receiptRecognitionInProgress) return;
+
+    receiptRecognitionInProgress = true;
+    receiptRecognitionComplete = false;
+    recognizedNonReceipt = false;
+    recognitionCategoryId = '';
+    updateExpenseSaveButton();
+    setReceiptAiStatus('Завантаження та перевірка документа через ШІ…');
+    const saveButton = document.getElementById('btn-save-expense');
+    if (saveButton) saveButton.disabled = true;
+
+    try {
+        let currentPath = document.getElementById('f-path').value;
+        if (uploadedReceiptFile !== file || !currentPath) {
+            const formData = new FormData();
+            formData.append('file', file);
+            const uploadRes = await fetch(`/api/upload/${userId}`, { method: 'POST', body: formData });
+            const uploadData = await uploadRes.json();
+            if (!uploadRes.ok || uploadData.status !== 'ok') {
+                throw new Error(uploadData.detail || 'Не вдалося завантажити чек.');
+            }
+            currentPath = uploadData.file_path;
+            uploadedReceiptFile = file;
+            document.getElementById('f-path').value = currentPath;
+            document.getElementById('receipt-preview-box').style.display = 'flex';
+            fileInput.style.display = 'none';
+        }
+
+        const response = await fetch('/api/receipts/recognize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_path: currentPath })
+        });
+        const result = await response.json();
+        if (!response.ok || result.status !== 'ok') {
+            throw new Error(result.detail || 'Не вдалося перевірити документ через ШІ.');
+        }
+
+        if (result.date) document.getElementById('f-date').value = result.date;
+        if (result.amount !== null && result.amount !== undefined && Number.isFinite(Number(result.amount))) {
+            const amount = Math.round(Number(result.amount) * 100) / 100;
+            const hryvnia = Math.floor(amount);
+            const kopeck = Math.round((amount - hryvnia) * 100);
+            document.getElementById('f-hryvnia').value = hryvnia;
+            document.getElementById('f-kopeck').value = String(kopeck).padStart(2, '0');
+        }
+        if (result.expense_name) document.getElementById('f-name').value = result.expense_name;
+                if (result.category) {
+            recognitionCategoryId = String(result.category);
+            const categorySelect = document.getElementById('f-category');
+            let option = Array.from(categorySelect.options).find(item => item.value === recognitionCategoryId);
+            if (!option) {
+                option = document.createElement('option');
+                option.value = recognitionCategoryId;
+                option.textContent = result.category_name || recognitionCategoryId;
+                categorySelect.appendChild(option);
+            }
+            categorySelect.value = recognitionCategoryId;
+        }
+
+        recognizedNonReceipt = result.is_receipt === false;
+        recognizedDocumentType = result.document_type || 'невідомий документ';
+        receiptRecognitionComplete = true;
+        const missingDateNote = result.date_found === false ? ' Дату не вдалося визначити — вкажіть її вручну.' : '';
+        if (recognizedNonReceipt) {
+            setReceiptAiStatus(`ШІ визначив документ як «${recognizedDocumentType}», а не чек. Перевірте або виправте дату, суму, назву й категорію, потім натисніть «Передати адміну». Витрата не буде додана до погодження.${missingDateNote}`, 'warning');
+        } else if (!result.category) {
+            setReceiptAiStatus(`Чек розпізнано. Перевірте заповнені поля та оберіть категорію вручну.${missingDateNote}`);
+        } else {
+            setReceiptAiStatus(`Чек розпізнано. Перевірте поля та натисніть «Зберегти».${missingDateNote}`);
+        }
+        updateExpenseSaveButton();
+    } catch (error) {
+        setReceiptAiStatus(error.message || 'Не вдалося перевірити документ.', 'error');
+    } finally {
+        receiptRecognitionInProgress = false;
+        if (saveButton) saveButton.disabled = false;
+    }
+}
+
 function openForm(expenseId = '', date = '', amount = '', name = '', category = '', path = '') {
+    receiptRecognitionComplete = false;
+    receiptRecognitionInProgress = false;
+    recognizedNonReceipt = urlParams.get('invalid_receipt') === '1';
+    recognizedDocumentType = urlParams.get('document_type') || 'невідомий документ';
+    uploadedReceiptFile = null;
+    recognitionCategoryId = '';
+    setReceiptAiStatus(recognizedNonReceipt
+        ? `Документ «${recognizedDocumentType}» потребує перевірки адміністратором. Перевірте або виправте дані перед передачею.`
+        : '', recognizedNonReceipt ? 'warning' : 'info');
+    updateExpenseSaveButton();
     document.getElementById('f-expense-id').value = expenseId;
     document.getElementById('f-date').value = formatDateForInput(date);
     
@@ -1250,7 +1368,7 @@ function openForm(expenseId = '', date = '', amount = '', name = '', category = 
 
     document.getElementById('f-name').value = name;
     
-    const catSelect = document.getElementById('f-category');
+        const catSelect = document.getElementById('f-category');
     let matchedOption = Array.from(catSelect.options).find(
         opt => opt.value === category || opt.textContent.trim() === String(category).trim()
     );
@@ -1270,6 +1388,7 @@ function openForm(expenseId = '', date = '', amount = '', name = '', category = 
     document.getElementById('f-path').value = path;
     const fileInput = document.getElementById('f-file');
     fileInput.value = '';
+    fileInput.style.display = 'block';
     
     if (path && path.trim() !== '') {
         document.getElementById('receipt-preview-box').style.display = 'flex';
@@ -1288,7 +1407,12 @@ function removeAttachedReceipt() {
     document.getElementById('f-path').value = '';
     document.getElementById('receipt-preview-box').style.display = 'none';
     document.getElementById('f-file').style.display = 'block';
-    document.getElementById('f-file').value = ''; 
+    document.getElementById('f-file').value = '';
+    uploadedReceiptFile = null;
+    receiptRecognitionComplete = false;
+    recognizedNonReceipt = false;
+    setReceiptAiStatus('');
+    updateExpenseSaveButton();
 }
 
 function viewAttachedReceipt() {
@@ -1454,49 +1578,29 @@ async function saveExpense() {
 
     try {
         const fileInput = document.getElementById('f-file');
-        let currentPath = document.getElementById('f-path').value;
-
-        if (fileInput.files.length > 0) {
-            const formData = new FormData();
-            formData.append("file", fileInput.files[0]);
-            const uploadRes = await fetch(`/api/upload/${userId}`, { method: "POST", body: formData });
-            const uploadData = await uploadRes.json();
-            if (!uploadRes.ok || uploadData.status !== "ok") {
-                throw new Error(uploadData.detail || "Не вдалося завантажити чек.");
-            }
-            currentPath = uploadData.file_path;
+        if (fileInput.files.length > 0 && !receiptRecognitionComplete) {
+            await onReceiptFileSelected();
+            return;
         }
+        const currentPath = document.getElementById('f-path').value;
 
         const expenseId = document.getElementById('f-expense-id').value;
         const hryvnia = parseInt(document.getElementById('f-hryvnia').value) || 0;
-        const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
+                const kopeck = parseInt(document.getElementById('f-kopeck').value) || 0;
         const totalAmount = hryvnia + (kopeck / 100);
         const msgId = urlParams.get('msg_id');
         const selectedCategoryId = document.getElementById('f-category').value;
         const payload = {
             date: document.getElementById('f-date').value,
-            amount: totalAmount,
+                        amount: totalAmount,
             expense_name: document.getElementById('f-name').value,
             category: selectedCategoryId,
             file_path: currentPath,
             msg_id: msgId ? parseInt(msgId) : null
         };
 
-        if (!expenseId && fileInput.files.length > 0 && urlParams.get('invalid_receipt') !== '1') {
-            const response = await fetch('/api/receipts/recognize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file_path: currentPath })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.detail || 'Не вдалося перевірити чек через ШІ.');
-            closeForm();
-            if (tg) tg.close();
-            return;
-        }
-
-        if (urlParams.get('invalid_receipt') === '1') {
-            payload.document_type = urlParams.get('document_type') || 'невідомий документ';
+        if (recognizedNonReceipt || urlParams.get('invalid_receipt') === '1') {
+            payload.document_type = recognizedDocumentType || urlParams.get('document_type') || 'невідомий документ';
             const response = await fetch('/api/invalid-receipts/submit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1504,6 +1608,7 @@ async function saveExpense() {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.detail || 'Не вдалося передати документ адміністратору.');
+            alert('Документ передано адміністратору на перевірку. Витрата з’явиться після погодження.');
             closeForm();
             if (tg) tg.close();
             return;
@@ -1634,7 +1739,9 @@ function renderCategorySelectOptions() {
         catSelect.appendChild(option);
     });
 
-    if (currentVal && Array.from(catSelect.options).some(opt => opt.value === currentVal)) {
+    if (recognitionCategoryId && Array.from(catSelect.options).some(opt => opt.value === recognitionCategoryId)) {
+        catSelect.value = recognitionCategoryId;
+    } else if (currentVal && Array.from(catSelect.options).some(opt => opt.value === currentVal)) {
         catSelect.value = currentVal;
     }
 }

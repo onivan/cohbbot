@@ -612,7 +612,7 @@ def _owned_receipt_url(user_id: int, supplied_url: str) -> str:
 @app.post("/api/receipts/recognize")
 async def recognize_web_receipt(data: ReceiptRecognitionData,
                                 current_user: int = Depends(get_current_user)):
-    """Run the standard receipt AI flow for a file uploaded from the Web App."""
+    """Recognize an uploaded image and return a draft for the Web App form."""
     receipt_url = _owned_receipt_url(current_user, data.file_path.strip())
     local_path = os.path.join(
         os.getcwd(), unquote(urlsplit(receipt_url).path).lstrip(os.sep)
@@ -627,33 +627,12 @@ async def recognize_web_receipt(data: ReceiptRecognitionData,
     if user_info.get("status", "pending") != "active" or not center_id:
         raise HTTPException(status_code=403, detail="Обліковий запис не активовано або не призначено Центр Надії")
 
-    from bot_setup import dp
-    from aiogram.fsm.context import FSMContext
-    from aiogram.fsm.storage.base import StorageKey
-    from handlers.states import ReceiptState
-
-    state = FSMContext(
-        storage=dp.storage,
-        key=StorageKey(bot_id=bot.id, chat_id=current_user, user_id=current_user),
-    )
-    existing_state = await state.get_state()
-    if existing_state in (
-        ReceiptState.waiting_for_confirmation.state,
-        ReceiptState.waiting_for_edit_date.state,
-        ReceiptState.waiting_for_edit_amount.state,
-        ReceiptState.waiting_for_edit_name.state,
-        ReceiptState.waiting_for_edit_category.state,
-        ReceiptState.waiting_for_category_selection.state,
-        ReceiptState.waiting_for_invalid_receipt_amount.state,
-    ):
-        raise HTTPException(status_code=409, detail="Спочатку завершіть або скасуйте поточну чернетку чека в чаті")
-
     categories = await database.get_categories(current_user)
-    valid_categories = [
+    category_names = [
         str(cat.get("name", "")) if isinstance(cat, dict) else str(cat)
         for cat in categories
     ]
-    valid_categories = [category for category in valid_categories if category]
+    category_names = [name for name in category_names if name]
     model_config = await database.get_active_ai_model()
     if not model_config:
         from ai_service import AIServiceError
@@ -669,27 +648,18 @@ async def recognize_web_receipt(data: ReceiptRecognitionData,
         raise HTTPException(status_code=503, detail="Сервіс розпізнавання чеків не налаштований")
 
     try:
-        processing_message = await bot.send_message(current_user, "⏳ Перевіряю чек через ШІ...")
-    except Exception as error:
-        logging.warning("Не вдалося написати користувачу %s у Telegram: %s", current_user, error)
-        raise HTTPException(status_code=400, detail="Відкрийте чат із ботом і спробуйте додати чек знову")
-    try:
         from ai_service import AIServiceError, parse_receipt_image
         image = await asyncio.to_thread(lambda: Image.open(local_path).convert("RGB"))
-        result = await parse_receipt_image(image, valid_categories, model_config)
+        result = await parse_receipt_image(image, category_names, model_config)
     except AIServiceError as error:
         from handlers.receipts import notify_admins_ai_error
         try:
             await notify_admins_ai_error(error, model_config, current_user, user_info.get("name", "Невідомо"))
         except Exception:
             logging.exception("Не вдалося сповістити адміністраторів про помилку AI")
-        await processing_message.edit_text(
-            "⚠️ Не вдалося розпізнати чек через технічну проблему сервісу. Адміністратора повідомлено. Спробуйте пізніше."
-        )
         raise HTTPException(status_code=503, detail="Не вдалося перевірити чек через ШІ. Спробуйте пізніше")
     except Exception as error:
         logging.exception("Помилка розпізнавання чека з Web App: %s", error)
-        await processing_message.edit_text("⚠️ Не вдалося прочитати файл чека. Перевірте зображення та спробуйте ще раз.")
         raise HTTPException(status_code=400, detail="Не вдалося прочитати файл чека")
 
     usage = result.get("_usage") or {}
@@ -703,79 +673,42 @@ async def recognize_web_receipt(data: ReceiptRecognitionData,
             ai_model_id=model_config.get("id"),
         ))
 
-    if not result.get("is_receipt", True):
-        raw_date = str(result.get("receipt_date") or "").strip()[:10]
-        try:
-            if raw_date:
-                datetime.strptime(raw_date, "%Y-%m-%d")
-            else:
-                raw_date = None
-        except ValueError:
+    raw_date = str(result.get("receipt_date") or "").strip().split(" ")[0]
+    try:
+        if raw_date:
+            raw_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+        else:
             raw_date = None
-        try:
-            amount = float(str(result.get("amount") or "").replace(",", "."))
-            amount = round(amount, 2) if math.isfinite(amount) and amount > 0 else None
-        except (TypeError, ValueError):
-            amount = None
-
-        from handlers.receipts import render_invalid_receipt_summary
-        await render_invalid_receipt_summary(processing_message, {
-            "amount": amount,
-            "expense_name": result.get("expense_name") or "",
-            "category": result.get("category") or "",
-            "receipt_date": raw_date,
-            "document_type": (result.get("document_type") or "невідомий документ").strip(),
-            "file_path": receipt_url,
-            "local_fs_path": local_path,
-            "date_not_found": raw_date is None,
-        }, state)
-        return {"status": "ok", "is_receipt": False, "message_id": processing_message.message_id}
+    except ValueError:
+        raw_date = None
 
     try:
-        amount = float(str(result.get("amount") or 0).replace(",", "."))
+        amount = float(str(result.get("amount") or "").replace(",", "."))
+        amount = round(amount, 2) if math.isfinite(amount) and amount >= 0 else None
     except (TypeError, ValueError):
-        amount = 0
-    if not math.isfinite(amount) or amount < 0:
-        amount = 0
-    raw_date = str(result.get("receipt_date") or "").strip().split(" ")[0]
-    date_not_found = True
-    if raw_date:
-        try:
-            raw_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%Y-%m-%d")
-            date_not_found = False
-        except ValueError:
-            raw_date = ""
-    if not raw_date:
-        raw_date = datetime.now().strftime("%Y-%m-%d")
+        amount = None
 
-    receipt_data = {
-        "amount": amount,
-        "expense_name": result.get("expense_name") or "",
-        "category": result.get("category") or "",
-        "receipt_date": raw_date,
-        "file_path": receipt_url,
-        "local_fs_path": local_path,
-        "valid_categories": valid_categories,
-        "date_not_found": date_not_found,
-    }
-    await state.update_data(**receipt_data)
-    category = receipt_data["category"]
-    if not category or category not in valid_categories:
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=name, callback_data=f"selcat_{index}")]
-            for index, name in enumerate(valid_categories)
-        ]) if valid_categories else None
-        await state.set_state(ReceiptState.waiting_for_category_selection)
-        await processing_message.edit_text(
-            "⚠️ Не вдалося автоматично підібрати категорію. Оберіть її зі списку:",
-            reply_markup=keyboard,
+    ai_category = str(result.get("category") or "").strip()
+    matched_category = next((
+        cat for cat in categories
+        if isinstance(cat, dict) and (
+            str(cat.get("id", "")) == ai_category
+            or str(cat.get("name", "")).casefold() == ai_category.casefold()
         )
-    else:
-        from handlers.receipts import render_summary
-        await render_summary(processing_message, receipt_data, state)
+    ), None)
 
-    return {"status": "ok", "is_receipt": True, "message_id": processing_message.message_id}
+    return {
+        "status": "ok",
+        "file_path": receipt_url,
+        "is_receipt": bool(result.get("is_receipt", True)),
+        "document_type": (result.get("document_type") or "невідомий документ").strip(),
+        "date": raw_date,
+        "date_found": raw_date is not None,
+        "amount": amount,
+        "expense_name": str(result.get("expense_name") or "").strip(),
+        "category": str(matched_category.get("id")) if matched_category else "",
+        "category_name": str(matched_category.get("name")) if matched_category else ai_category,
+    }
 
 
 @app.post("/api/invalid-receipts/submit")
