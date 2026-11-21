@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: C1
+- branch: feat/c1-duplicate-expenses
+- since: 2026-11-21T14:46:57Z
+- note: Реалізація попередження про дублікати витрат у боті та вебдодатку
 
 
 
