@@ -372,6 +372,45 @@ def _notify_budget_safe(center_id, category_id, day, expense_id, amount=0):
         logging.exception("Не вдалося запустити перевірку ліміту ЦН %s", center_id)
 
 
+async def find_duplicate_expense(center_id: int, date, amount, category_id: str, name: str):
+    """Знаходить останню витрату з такими самими ключовими полями в межах ЦН."""
+    expense_date = str(date or '').strip().split(' ')[0]
+    category_id = str(category_id or '').strip()
+    expense_name = str(name or '').strip()
+    if not center_id or not expense_date or not category_id or not expense_name:
+        return None
+    try:
+        amount_value = round(float(amount), 2)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(amount_value):
+        return None
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT id, date, amount, expense_name, category_id
+                   FROM expenses
+                   WHERE center_id = %s AND date = %s AND amount = %s
+                     AND category_id = %s
+                     AND LOWER(TRIM(expense_name)) = LOWER(TRIM(%s))
+                   ORDER BY created_at DESC LIMIT 1""",
+                (center_id, expense_date, amount_value, category_id, expense_name),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return None
+    return {
+        'expense_id': row['id'],
+        'date': str(row['date']),
+        'amount': float(row['amount']),
+        'expense_name': row['expense_name'],
+        'category_id': row['category_id'],
+    }
+
+
 async def add_expense(row_data: list) -> str:
     date, user_id, amount, expense_name, cat_input, file_path = row_data
     cat_id = await get_category_id_by_name(cat_input, user_id)

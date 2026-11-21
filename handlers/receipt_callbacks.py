@@ -5,8 +5,9 @@ from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 
 from database import (
-    users_cache, add_expense, get_category_id_by_name, build_category_formula,
-    decide_invalid_receipt, close_invalid_receipt_by_user,
+    users_cache, add_expense, find_duplicate_expense, get_category_id_by_name,
+    get_user_center_id, build_category_formula, decide_invalid_receipt,
+    close_invalid_receipt_by_user,
 )
 
 from bot_setup import bot
@@ -38,52 +39,77 @@ async def process_category_selection(callback_query: types.CallbackQuery, state:
     await render_summary(callback_query.message, data_fsm, state)
     await callback_query.answer()
 
-@router.callback_query(F.data.in_(["receipt_save", "receipt_cancel"]), ReceiptState.waiting_for_confirmation)
+@router.callback_query(
+    F.data.in_(["receipt_save", "receipt_save_anyway", "receipt_cancel", "receipt_duplicate_cancel"]),
+    ReceiptState.waiting_for_confirmation,
+)
 async def process_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    """Остаточне збереження в Google Таблицю або скасування запису"""
+    """Зберігає витрату з попередженням про можливий дублікат або скасовує її."""
     data = await state.get_data()
     user_id = callback_query.from_user.id
     
-    if callback_query.data == "receipt_save":
-        user_id_str = str(user_id)
-        user_info = users_cache.get(user_id_str, {})
-        user_name = user_info.get('name', 'Невідомо')
-        
-        receipt_date = data.get('receipt_date')
-        if not receipt_date or not str(receipt_date).strip():
-            receipt_date = datetime.now().strftime("%Y-%m-%d")
-        else:
-            receipt_date = str(receipt_date).strip().split(' ')[0]
+    receipt_date = data.get('receipt_date')
+    if not receipt_date or not str(receipt_date).strip():
+        receipt_date = datetime.now().strftime("%Y-%m-%d")
+    else:
+        receipt_date = str(receipt_date).strip().split(' ')[0]
+    category_name = data.get('category', 'Інше')
 
-        category_name = data.get('category', 'Інше')
-        
+    if callback_query.data == "receipt_save":
+        category_id = await get_category_id_by_name(category_name, user_id)
+        center_id = await get_user_center_id(user_id) or 1
+        duplicate = await find_duplicate_expense(
+            center_id, receipt_date, data['amount'], category_id, data['expense_name']
+        )
+        if duplicate:
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(
+                    text="✅ Все одно додати", callback_data="receipt_save_anyway"
+                )],
+                [types.InlineKeyboardButton(
+                    text="❌ Скасувати", callback_data="receipt_duplicate_cancel"
+                )],
+            ])
+            await callback_query.message.edit_text(
+                "⚠️ Схоже, цей чек уже додано:\n"
+                f"{duplicate['date']} · {duplicate['amount']:.2f} грн · "
+                f"{duplicate['expense_name']}\n\n"
+                "Додати витрату ще раз?",
+                reply_markup=keyboard,
+            )
+            await callback_query.answer("Знайдено схожу витрату.")
+            return
+
+    if callback_query.data in ("receipt_save", "receipt_save_anyway"):
         row_data = [
-            receipt_date, 
-            user_id, 
-            data['amount'], 
-            data['expense_name'], 
+            receipt_date,
+            user_id,
+            data['amount'],
+            data['expense_name'],
             category_name,
-            data.get('file_path', '')
+            data.get('file_path', ''),
         ]
-        
         await add_expense(row_data)
         await callback_query.message.edit_text(
-            f"✅ Збережено: **{data['amount']} грн** за {receipt_date} у «{category_name}».", 
-            parse_mode="Markdown"
+            f"✅ Збережено: **{data['amount']} грн** за {receipt_date} у «{category_name}».",
+            parse_mode="Markdown",
         )
-    
-    elif callback_query.data == "receipt_cancel":
-        # Видаляємо локальний файл у разі скасування, використовуючи збережений локальний шлях
+
+    elif callback_query.data in ("receipt_cancel", "receipt_duplicate_cancel"):
         local_path = data.get('local_fs_path', '')
-        
         if local_path:
-            # Асинхронні перевірка та видалення файлу
-            file_exists = await asyncio.to_thread(os.path.exists, local_path)
-            if file_exists:
-                await asyncio.to_thread(os.remove, local_path)
-                
-                await callback_query.message.edit_text("🚫 Скасовано.")
-        
+            try:
+                if await asyncio.to_thread(os.path.exists, local_path):
+                    await asyncio.to_thread(os.remove, local_path)
+            except OSError:
+                pass
+        text = (
+            "🚫 Додавання скасовано. Витрату не створено."
+            if callback_query.data == "receipt_duplicate_cancel"
+            else "🚫 Скасовано."
+        )
+        await callback_query.message.edit_text(text)
+
     await state.clear()
     await callback_query.answer()
 

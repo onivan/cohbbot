@@ -122,6 +122,7 @@ class ExpenseData(BaseModel):
     category: str  # Зберігає category_id або назву
     file_path: Optional[str] = ""
     msg_id: Optional[int] = None
+    allow_duplicate: bool = False
 
 
 class InvalidReceiptSubmissionData(ExpenseData):
@@ -867,6 +868,20 @@ async def submit_invalid_receipt(data: InvalidReceiptSubmissionData,
 
 @app.post("/api/expenses/{user_id}")
 async def create_expense(user_id: int, data: ExpenseData, current_user: int = Depends(get_current_user)):
+    # Перед збереженням перевіряємо збіг у межах ЦН; явне підтвердження обходить лише попередження.
+    if not data.allow_duplicate:
+        center_id = await database.get_user_center_id(user_id) or 1
+        category_id = await database.get_category_id_by_name(data.category, user_id)
+        duplicate = await database.find_duplicate_expense(
+            center_id, data.date, data.amount, category_id, data.expense_name
+        )
+        if duplicate:
+            raise HTTPException(status_code=409, detail={
+                "code": "duplicate_expense",
+                "message": "Схоже, цей чек уже додано",
+                "expense": duplicate,
+            })
+
     # Очікується рядок: [date, user_id, amount, expense_name, category, file_path]
     row_data = [data.date, str(user_id), data.amount, data.expense_name, data.category, data.file_path]
     expense_id = await database.add_expense(row_data)

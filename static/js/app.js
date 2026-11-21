@@ -1671,12 +1671,34 @@ async function saveExpense() {
 
         const method = expenseId ? 'PUT' : 'POST';
         const url = expenseId ? `/api/expenses/${userId}/${expenseId}` : `/api/expenses/${userId}`;
-        const response = await fetch(url, {
+        const requestOptions = {
             method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error('Помилка збереження витрати.');
+        };
+        let response = await fetch(url, requestOptions);
+        if (response.status === 409 && method === 'POST') {
+            const duplicateResult = await response.json().catch(() => ({}));
+            const duplicate = duplicateResult.detail;
+            if (duplicate && duplicate.code === 'duplicate_expense') {
+                const existing = duplicate.expense || {};
+                const prompt = `${duplicate.message || 'Схоже, цей чек уже додано'}:\n` +
+                    `${existing.date || ''} · ${Number(existing.amount || 0).toFixed(2)} грн · ` +
+                    `${existing.expense_name || ''}\n\nВсе одно додати витрату?`;
+                const confirmed = tg && typeof tg.showConfirm === 'function'
+                    ? await new Promise(resolve => tg.showConfirm(prompt, resolve))
+                    : window.confirm(prompt);
+                if (!confirmed) return;
+                payload.allow_duplicate = true;
+                requestOptions.body = JSON.stringify(payload);
+                response = await fetch(url, requestOptions);
+            }
+        }
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            const detail = result.detail;
+            throw new Error(typeof detail === 'string' ? detail : 'Помилка збереження витрати.');
+        }
         closeForm();
         if (isAdminSummaryMode() && currentUserCenterId) {
             const centerFilter = document.getElementById('main-center-filter');
