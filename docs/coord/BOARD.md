@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: B2
+- branch: dev
+- since: 2026-11-21T10:05:48Z
+- note: Сповіщення ЦН про перевитрату категорії та інтеграція журналу B4.
 
 
 
