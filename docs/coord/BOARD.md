@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: H1
+- branch: dev
+- since: 2026-11-21T09:29:08Z
+- note: Права на читання бюджетів ЦН та регресійні перевірки доступу.
 
 
 
