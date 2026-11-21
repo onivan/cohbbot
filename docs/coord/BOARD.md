@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: A4 mobile upload identity
-- branch: dev
-- since: 2026-11-20T16:38:35Z
-- note: Investigating Telegram WebApp mobile upload identity mismatch; will use authenticated Telegram initData to avoid stale browser cookie identity.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -166,3 +166,9 @@
 - Ручні кроки: користувачу задеплоїти через `./deploy.sh`, перевірити `make status` і `make test`; пройти валідний чек у Web App, не-чек → A3-подання без автозбереження витрати, а також Telegram approve/reject і перевірити видалення картки адміністратора. Врахувати H2 (`SECRET_KEY` може скидати сесії після рестарту).
 - Наступний крок: завершити staging acceptance A4/A3, потім захопити A5 (вартість і якість AI-розпізнавання).
 - Лок звільнено.
+
+### 2026-11-21 · A4 · закриття за підтвердженням користувача
+- Користувач підтвердив: A4 перевірено, задачу можна закрити. Підтвердження зафіксовано в TODO; лок A4 звільнено.
+- Нові тести й деплой у цій сесії не виконувались; SHA перевіреної версії користувач не зазначив.
+- A3 та окрема перевірка видалення карток цим підтвердженням автоматично не закриваються.
+- Наступний крок: H2 — постійний SECRET_KEY, за `docs/PRE_RELEASE_PLAN.md`.
