@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: C1
+- branch: fix/c1-receipt-content-hash
+- since: 2026-11-21T17:29:02Z
+- note: Додати хеш файла чека як основний критерій виявлення дубля
 
 
 
