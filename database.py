@@ -545,6 +545,25 @@ async def get_user_expenses(user_id: int):
 # 4. БЮДЖЕТИ
 # ==========================================
 
+async def get_category_spent(center_id: int, category_id: str, month: str) -> float:
+    """Сума витрат категорії ЦН за місяць YYYY-MM; без витрат — 0.0."""
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+    date_from, date_to = _month_bounds(month)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT COALESCE(SUM(amount), 0) AS spent
+                   FROM expenses
+                   WHERE center_id = %s AND category_id = %s
+                     AND date >= %s AND date < %s""",
+                (center_id, category_id, date_from, date_to),
+            )
+            row = await cur.fetchone()
+    return _r2(row['spent'])
+
+
 async def get_center_budgets(center_id: int, month: str) -> dict:
     pool = await get_pool()
     budgets_map = {}
