@@ -10,6 +10,7 @@ if (tg) {
 }
 
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+const tgInitData = tg && typeof tg.initData === 'string' ? tg.initData : '';
 const urlParams = new URLSearchParams(window.location.search);
 const metaUserId = document.querySelector('meta[name="user-id"]')?.content;
 
@@ -33,14 +34,35 @@ window.fetch = function() {
         if (!config.headers) config.headers = {};
         if (config.headers instanceof Headers) {
             config.headers.set('x-telegram-user-id', userId);
+            if (tgInitData) config.headers.set('x-telegram-init-data', tgInitData);
         } else {
             config.headers['x-telegram-user-id'] = userId;
+            if (tgInitData) config.headers['x-telegram-init-data'] = tgInitData;
         }
     }
     return originalFetch(resource, config);
 };
 
-function openAdminPage() {
+// Keep page navigations (e.g. the admin panel) on the same Telegram account too.
+let telegramSessionSync = Promise.resolve(true);
+if (tgInitData) {
+    telegramSessionSync = originalFetch('/api/auth/telegram', {
+        method: 'POST',
+        headers: { 'x-telegram-init-data': tgInitData }
+    }).then(response => {
+        if (!response.ok) console.warn('Telegram session sync failed:', response.status);
+        return response.ok;
+    }).catch(error => {
+        console.warn('Telegram session sync failed:', error);
+        return false;
+    });
+}
+
+async function openAdminPage() {
+    if (tgInitData && !(await telegramSessionSync)) {
+        alert('Не вдалося підтвердити користувача Telegram. Перезапустіть Web App.');
+        return;
+    }
     if (userId) {
         window.location.href = `/admin?user_id=${userId}`;
     } else {

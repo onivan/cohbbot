@@ -18,9 +18,10 @@ check-vps:  ## (службова) перевірка, що адреса VPS за
 		echo "!! не задано COHB_VPS: cp .vps.env.example .vps.env && chmod 600 .vps.env" >&2; exit 1; }
 
 test: check-vps  ## тести на VPS (там БД, venv і запущений сервіс)
-	$(SSH) 'cd $(STAGING) && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
+	$(SSH) 'cd $(STAGING) && venv/bin/python -m unittest test_telegram_auth.py && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
 
 test-local:  ## тести локально (потрібен .env і доступ до БД)
+	python3 -m unittest test_telegram_auth.py
 	venv/bin/python test_cash.py
 	venv/bin/python test_centers_own.py
 

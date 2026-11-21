@@ -15,7 +15,8 @@ from datetime import datetime
 from urllib.parse import unquote, urlsplit
 from itsdangerous import URLSafeSerializer, BadSignature
 from PIL import Image
-from config import WEBAPP_URL, SECRET_KEY
+from config import WEBAPP_URL, SECRET_KEY, TELEGRAM_TOKEN
+from telegram_auth import telegram_webapp_user_id
 
 app = FastAPI(title="Expense Tracker WebApp")
 templates = Jinja2Templates(directory="templates")
@@ -34,8 +35,17 @@ def static_version(filename: str) -> str:
 from fastapi import Depends
 
 def get_current_user(request: Request) -> int:
-    """Витягує user_id з кукі сесії (для браузера) або з query params/заголовка (якщо з бота)"""
-    # 1. Спроба отримати з кукі
+    """Визначає користувача з підписаного initData або вебсесії."""
+    # У Telegram WebApp довіряємо тільки підписаним Telegram даним і ставимо
+    # їх вище за cookie: webview може надіслати застарілу cookie іншого профілю.
+    init_data = request.headers.get("x-telegram-init-data")
+    if init_data is not None:
+        telegram_user_id = telegram_webapp_user_id(init_data, TELEGRAM_TOKEN)
+        if telegram_user_id is None:
+            raise HTTPException(status_code=401, detail="Невалідні дані авторизації Telegram")
+        return telegram_user_id
+
+    # 1. Спроба отримати user_id з кукі браузерної сесії
     session_cookie = request.cookies.get("session_token")
     if session_cookie:
         try:
@@ -73,6 +83,23 @@ async def login_api(data: LoginData, response: Response):
         return {"status": "ok", "user_id": user_id}
     else:
         raise HTTPException(status_code=401, detail="Невірний або прострочений код")
+
+@app.post("/api/auth/telegram")
+async def telegram_session_api(request: Request, response: Response):
+    """Sync the browser session using signed Telegram WebApp data only."""
+    init_data = request.headers.get("x-telegram-init-data")
+    user_id = telegram_webapp_user_id(init_data or "", TELEGRAM_TOKEN)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Невалідні дані авторизації Telegram")
+
+    response.set_cookie(
+        key="session_token",
+        value=serializer.dumps(user_id),
+        httponly=True,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60,
+    )
+    return {"status": "ok"}
 
 @app.post("/api/auth/logout")
 async def logout_api(response: Response):
