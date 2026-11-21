@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: C1
-- branch: feat/c1-duplicate-expenses
-- since: 2026-11-21T15:10:39Z
-- note: Інтеграція C1 у dev і пуш для staging-перевірки
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -220,3 +220,11 @@
 - `dev` залишено без змін і придатною до деплою. Перед staging-перевіркою інтегрувати feature-гілку в `dev`, виконати `make test`, задеплоїти через `./deploy.sh`, звірити `make status`/SHA і пройти сценарії дубля, підтвердження, скасування та збігу в іншому ЦН.
 - TODO C1 та етап 7 лишаються відкритими до успішного staging acceptance. Лок звільнено.
 - Наступний крок: інтеграція `feat/c1-duplicate-expenses` у `dev` і staging-деплой/перевірка.
+
+### 2026-11-21T15:12Z · C1 · інтеграція у dev · ws-ubuntu → передача на staging
+- Злито `feat/c1-duplicate-expenses` у `dev`; merge-коміт `8becae5` запушено в `origin/dev`.
+- Після merge локально повторно пройшли `py_compile` для `database.py`, `webapp.py`, `handlers/receipt_callbacks.py`, `test_budget_duplicate.py`; `node --check static/js/app.js` і `git diff --check` також пройшли.
+- `make test` на VPS не запускався; staging-деплой та ручні сценарії не виконані. C1 і етап 7 лишаються відкритими до staging acceptance.
+- Наступний крок користувача: `./deploy.sh`, потім `make status` (активність сервісу й збіг SHA), `make test`.
+- Ручні staging-сценарії: (1) дубль у тому самому ЦН викликає попередження в боті й Web App; (2) «Все одно додати» створює витрату рівно один раз; (3) «Скасувати» не створює витрату; (4) такий самий запис в іншому ЦН не викликає попередження; (5) Web App лишається відкритим при скасуванні й показує успішне збереження після підтвердження.
+- Лок звільнено.
