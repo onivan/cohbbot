@@ -34,6 +34,7 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
             '3': {'center_id': 8, 'status': 'active', 'role': 'user'},
             '4': {'center_id': 7, 'status': 'blocked', 'role': 'user'},
             '5': {'center_id': 7, 'status': 'pending', 'role': 'user'},
+            '6': {'center_id': 7, 'status': 'active', 'role': 'user'},
         }))
 
     async def notify(self, amount=0):
@@ -67,7 +68,7 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
             'category_id': 'cat_food', 'category_name': 'Харчування <тест>',
             'spent': 120.5, 'budget': 100.0,
         })
-        self.assertEqual([c.args[0] for c in self.send.await_args_list], [1, 2])
+        self.assertEqual([c.args[0] for c in self.send.await_args_list], [1, 6])
         self.assertIn('120,50/100,00 грн', self.send.call_args.args[1])
         self.assertIn('2026-10', self.send.call_args.args[1])
         self.assertIsNone(self.send.call_args.kwargs['parse_mode'])
@@ -126,7 +127,9 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claim['payload']['expense_id'], 'exp_test')
         notify_admins.assert_awaited_once()
         self.assertIn('Досягнуто 90% ліміту', notify_admins.call_args.args[0])
-        self.send.assert_not_awaited()
+        self.assertEqual([call.args[0] for call in self.send.await_args_list], [1, 2])
+        self.assertTrue(all('Досягнуто 90% ліміту' in call.args[1]
+                            for call in self.send.await_args_list))
 
     async def test_threshold_not_sent_if_spend_does_not_cross(self):
         cases = [(89.99, 1.0), (90.5, 0.5), (120.0, 0.0)]
