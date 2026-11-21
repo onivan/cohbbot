@@ -1,0 +1,21 @@
+# Згенеровані середовища та залежності
+
+**/.venv/
+**/venv/
+**/node_modules/
+**/__pycache__/
+**/dist/
+**/build/
+.git/
+
+# Логи, локальні бази та приватні дані
+*.log
+*.sqlite
+*.sqlite3
+*.db
+/receipts/
+
+# Секрети й локальна конфігурація
+#.env
+#.vps.env
+#.workstation
