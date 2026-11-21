@@ -52,6 +52,12 @@ async def main():
     except Exception as e:
         logging.error(f"Не вдалося ініціалізувати схему сповіщень: {e}")
 
+    # 0.3 Налаштування та антиспам бюджетних попереджень
+    try:
+        await database.ensure_budget_alert_schema()
+    except Exception as e:
+        logging.error(f"Не вдалося ініціалізувати схему бюджетних сповіщень: {e}")
+
     # 1. Завантажуємо користувачів із MySQL
 
     await database.load_users()

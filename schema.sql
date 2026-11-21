@@ -75,6 +75,25 @@ CREATE TABLE IF NOT EXISTS `budgets` (
     CONSTRAINT `fk_budgets_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 6.1. Загальні налаштування застосунку та антиспам бюджетних сповіщень
+CREATE TABLE IF NOT EXISTS `app_settings` (
+    `key` VARCHAR(64) PRIMARY KEY,
+    `value` VARCHAR(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `app_settings` (`key`, `value`) VALUES ('budget_alert_threshold', '90');
+
+CREATE TABLE IF NOT EXISTS `budget_alerts` (
+    `center_id` INT NOT NULL,
+    `category_id` VARCHAR(50) NOT NULL,
+    `month` CHAR(7) NOT NULL,
+    `threshold` DECIMAL(5,2) NOT NULL,
+    `sent_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_budget_alert` (`center_id`, `category_id`, `month`, `threshold`),
+    CONSTRAINT `fk_budget_alert_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT `fk_budget_alert_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 7. Таблиця логів AI токенів (Gemini)
 CREATE TABLE IF NOT EXISTS `api_logs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -178,7 +197,7 @@ CREATE TABLE IF NOT EXISTS `cash_audit` (
 -- 13. Адмінські сповіщення
 CREATE TABLE IF NOT EXISTS `admin_notifications` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `type` VARCHAR(64) NOT NULL COMMENT 'invalid_receipt/cash_operation/negative_balance',
+    `type` VARCHAR(64) NOT NULL COMMENT 'invalid_receipt/cash_operation/negative_balance/budget_overrun/budget_threshold',
     `title` VARCHAR(191) NOT NULL,
     `message` TEXT NOT NULL,
     `center_id` INT NULL,

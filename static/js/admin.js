@@ -56,7 +56,8 @@ function switchTab(tabId) {
     if (tabId === 'matrix') loadMatrix();
     if (tabId === 'cash') { loadCash(); loadCashYear(); }
     if (tabId === 'ai') loadAiModels();
-    if (tabId === 'notifications') loadNotifications();
+        if (tabId === 'notifications') loadNotifications();
+    if (tabId === 'settings') loadBudgetAlertSettings();
 
 }
 
@@ -365,7 +366,8 @@ const notificationsPage = { limit: 50, offset: 0, total: 0 };
 function budgetNotificationLink(notification) {
     const payload = notification.payload || {};
     const centerId = Number(notification.center_id);
-    if (notification.type !== 'budget_overrun' || !Number.isInteger(centerId) || centerId <= 0
+    if (!['budget_overrun', 'budget_threshold'].includes(notification.type)
+            || !Number.isInteger(centerId) || centerId <= 0
             || !/^\d{4}-(0[1-9]|1[0-2])$/.test(payload.month || '') || !payload.category_id) return '';
     const query = new URLSearchParams({
         view: 'limits', budget_center: String(centerId),
@@ -415,7 +417,7 @@ async function loadNotifications(resetPage = false) {
     }
     rows.forEach(n => {
         const tr = document.createElement('tr');
-        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс', budget_overrun:'Перевитрата ліміту'})[n.type] || n.type;
+        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс', budget_overrun:'Перевитрата ліміту', budget_threshold:'Досягнуто порогу ліміту'})[n.type] || n.type;
         const receipt = n.receipt_path
             ? `<button type="button" class="btn-mini" style="background: #2196F3;" data-receipt-url="${cashEsc(n.receipt_path)}" data-receipt-title="${cashEsc('Чек: ' + (n.user_name || n.user_id || n.id))}" onclick="openReceiptFromButton(this)">📄 Переглянути чек</button>`
             : '';
@@ -531,7 +533,46 @@ async function setNotificationRead(id, isRead) {
 }
 
 // ==========================================
+// НАЛАШТУВАННЯ БЮДЖЕТНИХ СПОВІЩЕНЬ (B3)
+// ==========================================
+async function loadBudgetAlertSettings() {
+    const status = document.getElementById('budget-alert-settings-status');
+    if (status) status.textContent = 'Завантаження…';
+    const res = await fetchWithAuth('/api/admin/settings/budget-alert-threshold');
+    if (!res || !res.ok) {
+        if (status) status.textContent = 'Не вдалося завантажити налаштування.';
+        return;
+    }
+    const data = await res.json();
+    const input = document.getElementById('budget-alert-threshold');
+    if (input) input.value = data.threshold;
+    if (status) status.textContent = 'Поріг сповіщення про досягнення ліміту.';
+}
+
+async function saveBudgetAlertSettings() {
+    const input = document.getElementById('budget-alert-threshold');
+    const status = document.getElementById('budget-alert-settings-status');
+    const threshold = Number(input && input.value);
+    if (!Number.isFinite(threshold) || threshold < 1 || threshold > 100) {
+        alert('Вкажіть поріг від 1 до 100%.');
+        return;
+    }
+    const res = await fetchWithAuth('/api/admin/settings/budget-alert-threshold', {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({threshold})
+    });
+    if (res && res.ok) {
+        const data = await res.json();
+        if (input) input.value = data.threshold;
+        if (status) status.textContent = `Збережено: ${data.threshold}%.`;
+    } else if (res) {
+        alert(await cashApiError(res, 'Не вдалося зберегти поріг.'));
+    }
+}
+
+// ==========================================
 // ШІ-МОДЕЛІ (OPENROUTER)
+
 
 // ==========================================
 let allAiModels = [];

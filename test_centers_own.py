@@ -185,8 +185,27 @@ async def main():
         check('звичайний юзер -> /api/admin/centers 403', status == 403, 'status=%s' % status)
         status, _ = get_json('/api/admin/centers/summary', other)
         check('звичайний юзер -> /api/admin/centers/summary 403', status == 403, 'status=%s' % status)
+        status, _ = get_json('/api/admin/settings/budget-alert-threshold', other)
+        check('звичайний юзер -> читання B3 settings 403', status == 403, 'status=%s' % status)
+        req = urllib.request.Request(
+            BASE + '/api/admin/settings/budget-alert-threshold',
+            data=json.dumps({'threshold': 90}).encode('utf-8'),
+            headers={'x-telegram-user-id': str(other), 'Content-Type': 'application/json'},
+            method='PUT',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                status = response.status
+        except urllib.error.HTTPError as error:
+            status = error.code
+        check('звичайний юзер -> зміна B3 settings 403', status == 403, 'status=%s' % status)
     else:
         skip('негативні тести /api/admin/*', 'немає звичайного юзера у БД')
+
+    status, data = get_json('/api/admin/settings/budget-alert-threshold', admin)
+    check('адмін -> читання B3 settings 200 та поріг 1..100',
+          status == 200 and data and 1 <= float(data.get('threshold', 0)) <= 100,
+          'status=%s data=%s' % (status, data))
 
     print('\n[8] H1: права на читання бюджетів ЦН')
     month = MONTH or datetime.now().strftime('%Y-%m')

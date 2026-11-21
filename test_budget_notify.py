@@ -17,6 +17,10 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
             database, 'get_center_budgets', AsyncMock(return_value={'cat_food': 100.0})))
         self.spent = stack.enter_context(patch.object(
             database, 'get_category_spent', AsyncMock(return_value=120.5)))
+        self.threshold = stack.enter_context(patch.object(
+            database, 'get_budget_alert_threshold', AsyncMock(return_value=90.0)))
+        self.claim = stack.enter_context(patch.object(
+            database, 'claim_budget_alert', AsyncMock(return_value=False)))
         stack.enter_context(patch.object(database, 'get_all_categories', AsyncMock(
             return_value=[{'id': 'cat_food', 'name': 'Харчування <тест>'}])))
         stack.enter_context(patch.object(database, 'get_centers', AsyncMock(
@@ -32,8 +36,8 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
             '5': {'center_id': 7, 'status': 'pending', 'role': 'user'},
         }))
 
-    async def notify(self):
-        await budget_notify.notify_overrun(7, 'cat_food', '2026-10', 'exp_test')
+    async def notify(self, amount=0):
+        await budget_notify.notify_overrun(7, 'cat_food', '2026-10', 'exp_test', amount)
 
     async def test_missing_budget_is_not_zero_budget(self):
         self.budgets.return_value = {}
@@ -73,6 +77,7 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
         await self.notify()
         self.journal.assert_awaited_once()
         self.assertEqual(self.journal.call_args.kwargs['payload']['budget'], 0.0)
+        self.claim.assert_not_awaited()
 
     async def test_telegram_failure_does_not_stop_other_recipients(self):
         self.send.side_effect = [RuntimeError('test send failure'), None]
@@ -93,20 +98,72 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
             await self.notify()
         self.send.assert_not_awaited()
 
+    async def test_threshold_setting_failure_does_not_disable_overrun_warning(self):
+        self.threshold.side_effect = RuntimeError('settings table unavailable')
+        with self.assertLogs(level='ERROR'):
+            await self.notify()
+        self.journal.assert_awaited_once()
+        self.assertEqual(self.journal.call_args.kwargs['type'], 'budget_overrun')
+        self.assertEqual(self.send.await_count, 2)
+
     async def test_journal_still_created_without_recipients(self):
         with patch.object(database, 'users_cache', {}):
             await self.notify()
         self.journal.assert_awaited_once()
         self.send.assert_not_awaited()
 
-    async def test_background_task_uses_expense_month_and_is_released(self):
+    async def test_threshold_crossing_records_one_admin_event_and_sends_telegram(self):
+        self.spent.return_value = 90.0
+        self.claim.return_value = True
+        with patch('telegram_notifications.notify_admins', new_callable=AsyncMock) as notify_admins:
+            await self.notify(amount=1.0)
+        self.journal.assert_not_awaited()
+        self.claim.assert_awaited_once()
+        claim = self.claim.call_args.kwargs
+        self.assertEqual(self.claim.call_args.args, (7, 'cat_food', '2026-10', 90.0))
+        self.assertEqual(claim['title'], 'Досягнуто 90% ліміту')
+        self.assertEqual(claim['payload']['threshold'], 90.0)
+        self.assertEqual(claim['payload']['expense_id'], 'exp_test')
+        notify_admins.assert_awaited_once()
+        self.assertIn('Досягнуто 90% ліміту', notify_admins.call_args.args[0])
+        self.send.assert_not_awaited()
+
+    async def test_threshold_not_sent_if_spend_does_not_cross(self):
+        cases = [(89.99, 1.0), (90.5, 0.5), (120.0, 0.0)]
+        for spent, amount in cases:
+            with self.subTest(spent=spent, amount=amount):
+                self.spent.return_value = spent
+                await self.notify(amount=amount)
+        self.claim.assert_not_awaited()
+        self.journal.assert_not_awaited()
+
+    async def test_duplicate_threshold_claim_suppresses_admin_message_and_event(self):
+        self.spent.return_value = 95
+        self.claim.return_value = False
+        with patch('telegram_notifications.notify_admins', new_callable=AsyncMock) as notify_admins:
+            await self.notify(amount=10)
+        self.claim.assert_awaited_once()
+        self.assertEqual(self.claim.call_args.args, (7, 'cat_food', '2026-10', 90.0))
+        self.journal.assert_not_awaited()
+        notify_admins.assert_not_awaited()
+
+    async def test_threshold_claim_database_error_does_not_send_duplicate(self):
+        self.spent.return_value = 95
+        self.claim.side_effect = RuntimeError('claim failure')
+        with self.assertLogs(level='ERROR'):
+            with patch('telegram_notifications.notify_admins', new_callable=AsyncMock) as notify_admins:
+                await self.notify(amount=10)
+        self.journal.assert_not_awaited()
+        notify_admins.assert_not_awaited()
+
+    async def test_background_task_uses_expense_month_amount_and_is_released(self):
         with patch.object(budget_notify, 'notify_overrun', AsyncMock()) as notify:
-            budget_notify.after_expense(7, 'cat_food', '2026-10-31', 'exp_test')
+            budget_notify.after_expense(7, 'cat_food', '2026-10-31', 'exp_test', 12.5)
             tasks = list(budget_notify._bg_tasks)
             self.assertEqual(len(tasks), 1)
             await asyncio.gather(*tasks)
             await asyncio.sleep(0)
-            notify.assert_awaited_once_with(7, 'cat_food', '2026-10', 'exp_test')
+            notify.assert_awaited_once_with(7, 'cat_food', '2026-10', 'exp_test', 12.5)
             self.assertFalse(budget_notify._bg_tasks)
 
 
@@ -137,7 +194,7 @@ class BudgetExpenseHookTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_common_bot_and_web_save_starts_notification(self):
         expense_id = await database.add_expense(['2026-10-31', '1', 120.5, 'Тест', 'Харчування', ''])
-        self.after.assert_called_once_with(7, 'cat_food', '2026-10-31', expense_id)
+        self.after.assert_called_once_with(7, 'cat_food', '2026-10-31', expense_id, 120.5)
 
     async def test_failed_insert_does_not_notify(self):
         self.cursor.execute.side_effect = RuntimeError('test insert failure')
@@ -154,7 +211,7 @@ class BudgetExpenseHookTests(unittest.IsolatedAsyncioTestCase):
     async def test_approval_notifies_only_after_commit(self):
         self.after.side_effect = lambda *args: self.connection.commit.assert_awaited_once()
         result = await database.decide_invalid_receipt(10, 'approved', 2)
-        self.after.assert_called_once_with(7, 'cat_food', '2026-10-31', result['expense_id'])
+        self.after.assert_called_once_with(7, 'cat_food', '2026-10-31', result['expense_id'], 120.5)
 
     async def test_rejection_does_not_notify(self):
         await database.decide_invalid_receipt(10, 'rejected', 2)

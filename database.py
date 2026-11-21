@@ -363,11 +363,11 @@ async def set_center_category(center_id: int, category_id: str, is_enabled: bool
 # 3. ВИТРАТИ
 # ==========================================
 
-def _notify_budget_safe(center_id, category_id, day, expense_id):
-    """B2: збій запуску сповіщення не скасовує вже збережену витрату."""
+def _notify_budget_safe(center_id, category_id, day, expense_id, amount=0):
+    """B2/B3: збій запуску сповіщення не скасовує вже збережену витрату."""
     try:
         import budget_notify
-        budget_notify.after_expense(center_id, category_id, day, expense_id)
+        budget_notify.after_expense(center_id, category_id, day, expense_id, amount)
     except Exception:
         logging.exception("Не вдалося запустити перевірку ліміту ЦН %s", center_id)
 
@@ -401,7 +401,7 @@ async def add_expense(row_data: list) -> str:
             """, (expense_id, date, user_id, center_id, amount, expense_name, cat_id, file_path))
             
     await _touch_cash_safe(center_id, date, reason=f"витрату додано ({expense_id})")
-    _notify_budget_safe(center_id, cat_id, date, expense_id)
+    _notify_budget_safe(center_id, cat_id, date, expense_id, amount)
     return expense_id
 
 async def update_expense(expense_id: str, user_id: int, row_data: list):
@@ -554,6 +554,120 @@ async def get_user_expenses(user_id: int):
 # ==========================================
 # 4. БЮДЖЕТИ
 # ==========================================
+
+BUDGET_ALERT_DEFAULT_THRESHOLD = 90.0
+
+
+async def ensure_budget_alert_schema():
+    """Ідемпотентно створює налаштування й антиспам-ключі бюджетних сповіщень."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS `app_settings` (
+                    `key` VARCHAR(64) PRIMARY KEY,
+                    `value` VARCHAR(255) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+            await cur.execute(
+                "INSERT IGNORE INTO app_settings (`key`, `value`) VALUES (%s, %s)",
+                ('budget_alert_threshold', str(BUDGET_ALERT_DEFAULT_THRESHOLD)),
+            )
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS `budget_alerts` (
+                    `center_id` INT NOT NULL,
+                    `category_id` VARCHAR(50) NOT NULL,
+                    `month` CHAR(7) NOT NULL,
+                    `threshold` DECIMAL(5,2) NOT NULL,
+                    `sent_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_budget_alert` (`center_id`, `category_id`, `month`, `threshold`),
+                    CONSTRAINT `fk_budget_alert_center` FOREIGN KEY (`center_id`)
+                        REFERENCES `centers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+                    CONSTRAINT `fk_budget_alert_category` FOREIGN KEY (`category_id`)
+                        REFERENCES `categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+
+
+async def get_budget_alert_threshold() -> float:
+    """Поточний поріг сповіщення у відсотках (за замовчуванням 90%)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT `value` FROM app_settings WHERE `key` = %s",
+                              ('budget_alert_threshold',))
+            row = await cur.fetchone()
+    if not row:
+        return BUDGET_ALERT_DEFAULT_THRESHOLD
+    try:
+        value = float(row[0])
+        if math.isfinite(value) and 1 <= value <= 100:
+            return value
+    except (TypeError, ValueError, IndexError):
+        pass
+    logging.error("Некоректне значення budget_alert_threshold; використовуємо 90%%")
+    return BUDGET_ALERT_DEFAULT_THRESHOLD
+
+
+async def set_budget_alert_threshold(value) -> float:
+    """Зберігає поріг від 1 до 100 відсотків."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Поріг має бути числом від 1 до 100")
+    if not math.isfinite(value) or not 1 <= value <= 100:
+        raise ValueError("Поріг має бути від 1 до 100 відсотків")
+    value = round(value, 2)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO app_settings (`key`, `value`) VALUES (%s, %s)
+                   ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)""",
+                ('budget_alert_threshold', f'{value:g}'),
+            )
+    return value
+
+
+async def claim_budget_alert(center_id: int, category_id: str, month: str,
+                             threshold: float, title: str, message: str,
+                             payload: dict) -> bool:
+    """Одноразово записує B3-сповіщення й подію B4 атомарно."""
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        raise ValueError("Поріг має бути числом від 1 до 100")
+    if not math.isfinite(threshold) or not 1 <= threshold <= 100:
+        raise ValueError("Поріг має бути від 1 до 100 відсотків")
+    threshold = round(threshold, 2)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT IGNORE INTO budget_alerts
+                           (center_id, category_id, month, threshold)
+                       VALUES (%s, %s, %s, %s)""",
+                    (center_id, category_id, month, threshold),
+                )
+                if cur.rowcount != 1:
+                    await conn.rollback()
+                    return False
+                await cur.execute(
+                    """INSERT INTO admin_notifications
+                           (type, title, message, center_id, payload, action_status, action_at)
+                       VALUES ('budget_threshold', %s, %s, %s, %s, 'resolved', NOW())""",
+                    (title, message, center_id, json.dumps(payload or {}, ensure_ascii=False)),
+                )
+            await conn.commit()
+            return True
+        except Exception:
+            await conn.rollback()
+            raise
+
 
 async def get_category_spent(center_id: int, category_id: str, month: str) -> float:
     """Сума витрат категорії ЦН за місяць YYYY-MM; без витрат — 0.0."""
@@ -2337,7 +2451,7 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
 
     if decision == 'approved':
         await _touch_cash_safe(center_id, receipt_date, reason=f"чек погоджено адміном ({expense_id})")
-        _notify_budget_safe(center_id, category_id, receipt_date, expense_id)
+        _notify_budget_safe(center_id, category_id, receipt_date, expense_id, amount)
 
     return {
         'already_decided': False,

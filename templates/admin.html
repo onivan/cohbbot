@@ -61,6 +61,9 @@
         <button class="tab-btn" onclick="switchTab('cash')">Кошти</button>
         <button class="tab-btn" onclick="switchTab('ai')">ШІ-моделі</button>
         <button class="tab-btn" onclick="switchTab('notifications')">Сповіщення</button>
+        <button class="tab-btn" onclick="switchTab('settings')">Налаштування</button>
+
+
 
     </div>
 
@@ -211,6 +214,7 @@
                 <option value="">Усі типи</option><option value="invalid_receipt">Невалідний чек</option>
                 <option value="cash_operation">Операція з коштами</option><option value="negative_balance">Мінусовий баланс</option>
                 <option value="budget_overrun">Перевитрата ліміту</option>
+                <option value="budget_threshold">Досягнуто порогу ліміту</option>
             </select>
             <select id="notification-read" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Прочитаність: усі</option><option value="false">Непрочитані</option><option value="true">Прочитані</option>
@@ -234,6 +238,17 @@
             <button type="button" id="notifications-prev" onclick="notificationsPageMove(-1)">← Новіші</button>
             <span id="notifications-page-info" style="font-size:12px; color:#888;">—</span>
             <button type="button" id="notifications-next" onclick="notificationsPageMove(1)">Старіші →</button>
+        </div>
+    </div>
+
+    <div id="settings" class="tab-content">
+        <h3>Бюджетні сповіщення</h3>
+        <p>Сповіщати адміністраторів при першому досягненні порогу ліміту для ЦН, категорії та місяця.</p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label for="budget-alert-threshold">Поріг, % (1–100):</label>
+            <input type="number" id="budget-alert-threshold" min="1" max="100" step="1" style="width:100px; padding:7px;">
+            <button type="button" onclick="saveBudgetAlertSettings()">Зберегти</button>
+            <span id="budget-alert-settings-status" style="color:#666;"></span>
         </div>
     </div>
 
