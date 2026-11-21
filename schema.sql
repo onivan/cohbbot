@@ -53,10 +53,13 @@ CREATE TABLE IF NOT EXISTS `expenses` (
     `expense_name` VARCHAR(255) NOT NULL COMMENT 'Опис або назва товару/чека',
     `category_id` VARCHAR(50) NOT NULL COMMENT 'Категорія витрати',
     `receipt_path` TEXT NULL COMMENT 'Посилання/шлях до фото чека',
+    `receipt_sha256` CHAR(64) NULL COMMENT 'SHA-256 байтів фото чека для дедуплікації',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_expenses_center` (`center_id`),
     INDEX `idx_expenses_user` (`telegram_id`),
     INDEX `idx_expenses_date` (`date`),
+    INDEX `idx_expenses_center_receipt_hash` (`center_id`, `receipt_sha256`),
+    INDEX `idx_expenses_center_amount` (`center_id`, `amount`),
     CONSTRAINT `fk_expenses_user` FOREIGN KEY (`telegram_id`) REFERENCES `users` (`telegram_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT `fk_expenses_center` FOREIGN KEY (`center_id`) REFERENCES `centers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT `fk_expenses_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE

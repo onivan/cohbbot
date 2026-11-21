@@ -1,11 +1,14 @@
 import asyncio
+import hashlib
 import logging
 import json
 import math
+import os
 import re
 import uuid
 import time
 from datetime import datetime
+from urllib.parse import unquote, urlsplit
 import aiomysql
 from fastapi import HTTPException
 from config import (
@@ -372,21 +375,139 @@ def _notify_budget_safe(center_id, category_id, day, expense_id, amount=0):
         logging.exception("Не вдалося запустити перевірку ліміту ЦН %s", center_id)
 
 
-async def find_duplicate_expense(center_id: int, date, amount, category_id: str, name: str):
-    """Знаходить останню витрату з такими самими ключовими полями в межах ЦН."""
+_SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
+
+
+def _sha256_file(file_path: str) -> str:
+    """Обчислює SHA-256 потоково, не завантажуючи весь чек у пам'ять."""
+    digest = hashlib.sha256()
+    with open(file_path, 'rb') as receipt:
+        for chunk in iter(lambda: receipt.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+async def receipt_sha256(user_id: int, receipt_path: str) -> str | None:
+    """Хешує лише наявний локальний чек із receipts/{user_id}/; довільні шляхи відхиляє."""
+    if not user_id or not receipt_path:
+        return None
+    try:
+        url_path = unquote(urlsplit(str(receipt_path)).path)
+        relative_path = os.path.normpath(url_path).lstrip(os.sep)
+        expected_prefix = f"receipts/{int(user_id)}/"
+        receipts_root = os.path.realpath('receipts')
+        local_path = os.path.realpath(os.path.join(os.getcwd(), relative_path))
+        if not relative_path.startswith(expected_prefix):
+            return None
+        if os.path.commonpath((receipts_root, local_path)) != receipts_root:
+            return None
+        if not os.path.isfile(local_path):
+            return None
+        return await asyncio.to_thread(_sha256_file, local_path)
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+async def ensure_duplicate_expense_schema():
+    """Ідемпотентно додає SHA-256 чека та індекси для швидкого пошуку дублів."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for ddl in (
+                "ALTER TABLE `expenses` ADD COLUMN `receipt_sha256` CHAR(64) NULL AFTER `receipt_path`",
+                "ALTER TABLE `expenses` ADD INDEX `idx_expenses_center_receipt_hash` (`center_id`, `receipt_sha256`)",
+                "ALTER TABLE `expenses` ADD INDEX `idx_expenses_center_amount` (`center_id`, `amount`)",
+            ):
+                try:
+                    await cur.execute(ddl)
+                except Exception as error:
+                    # MySQL/MariaDB: колонка/індекс уже існує.
+                    if getattr(error, 'args', (None,))[0] not in (1060, 1061, 1831):
+                        raise
+
+
+def _duplicate_expense_result(row):
+    if not row:
+        return None
+    return {
+        'expense_id': row['id'],
+        'date': str(row['date']),
+        'amount': float(row['amount']),
+        'expense_name': row['expense_name'],
+        'category_id': row['category_id'],
+    }
+
+
+def _normalize_receipt_hash(receipt_hash):
+    value = str(receipt_hash or '').strip().lower()
+    return value if _SHA256_RE.fullmatch(value) else None
+
+
+async def find_duplicate_expense(center_id: int, date, amount, category_id: str,
+                                 name: str, receipt_hash: str = None):
+    """Спершу шукає однаковий файл у ЦН, потім legacy-збіг за сумою/полями."""
+    if not center_id:
+        return None
     expense_date = str(date or '').strip().split(' ')[0]
     category_id = str(category_id or '').strip()
     expense_name = str(name or '').strip()
-    if not center_id or not expense_date or not category_id or not expense_name:
-        return None
+    receipt_hash = _normalize_receipt_hash(receipt_hash)
     try:
         amount_value = round(float(amount), 2)
     except (TypeError, ValueError):
-        return None
-    if not math.isfinite(amount_value):
+        amount_value = None
+    if amount_value is not None and not math.isfinite(amount_value):
+        amount_value = None
+    if not receipt_hash and (
+        amount_value is None or not (expense_date and category_id and expense_name)
+    ):
         return None
 
     pool = await get_pool()
+    if receipt_hash:
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT id, date, amount, expense_name, category_id
+                       FROM expenses
+                       WHERE center_id = %s AND receipt_sha256 = %s
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (center_id, receipt_hash),
+                )
+                row = await cur.fetchone()
+        if row:
+            return _duplicate_expense_result(row)
+
+    if receipt_hash and amount_value is not None:
+        # Старі записи без хешу: звіряємо лише той самий ЦН і суму, а потім кешуємо SHA.
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT id, telegram_id, date, amount, expense_name, category_id, receipt_path
+                       FROM expenses
+                       WHERE center_id = %s AND amount = %s AND receipt_sha256 IS NULL
+                         AND receipt_path IS NOT NULL AND receipt_path <> ''
+                       ORDER BY created_at DESC""",
+                    (center_id, amount_value),
+                )
+                legacy_rows = await cur.fetchall() or []
+
+        for legacy in legacy_rows:
+            old_hash = await receipt_sha256(legacy['telegram_id'], legacy['receipt_path'])
+            if not old_hash:
+                continue
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """UPDATE expenses SET receipt_sha256 = %s
+                           WHERE id = %s AND receipt_sha256 IS NULL""",
+                        (old_hash, legacy['id']),
+                    )
+            if old_hash == receipt_hash:
+                return _duplicate_expense_result(legacy)
+
+    if amount_value is None or not (expense_date and category_id and expense_name):
+        return None
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
@@ -399,20 +520,12 @@ async def find_duplicate_expense(center_id: int, date, amount, category_id: str,
                 (center_id, expense_date, amount_value, category_id, expense_name),
             )
             row = await cur.fetchone()
-
-    if not row:
-        return None
-    return {
-        'expense_id': row['id'],
-        'date': str(row['date']),
-        'amount': float(row['amount']),
-        'expense_name': row['expense_name'],
-        'category_id': row['category_id'],
-    }
+    return _duplicate_expense_result(row)
 
 
-async def add_expense(row_data: list) -> str:
+async def add_expense(row_data: list, receipt_hash: str = None) -> str:
     date, user_id, amount, expense_name, cat_input, file_path = row_data
+    receipt_hash = _normalize_receipt_hash(receipt_hash) or await receipt_sha256(user_id, file_path)
     cat_id = await get_category_id_by_name(cat_input, user_id)
     
     u_info = users_cache.get(str(user_id), {})
@@ -435,9 +548,13 @@ async def add_expense(row_data: list) -> str:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                INSERT INTO expenses (id, date, telegram_id, center_id, amount, expense_name, category_id, receipt_path)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (expense_id, date, user_id, center_id, amount, expense_name, cat_id, file_path))
+                INSERT INTO expenses
+                    (id, date, telegram_id, center_id, amount, expense_name, category_id, receipt_path, receipt_sha256)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                expense_id, date, user_id, center_id, amount, expense_name,
+                cat_id, file_path, _normalize_receipt_hash(receipt_hash),
+            ))
             
     await _touch_cash_safe(center_id, date, reason=f"витрату додано ({expense_id})")
     _notify_budget_safe(center_id, cat_id, date, expense_id, amount)
@@ -446,6 +563,7 @@ async def add_expense(row_data: list) -> str:
 async def update_expense(expense_id: str, user_id: int, row_data: list):
     date, uid, amount, expense_name, cat_input, file_path = row_data
     cat_id = await get_category_id_by_name(cat_input, user_id)
+    receipt_hash = _normalize_receipt_hash(await receipt_sha256(user_id, file_path))
     
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -459,9 +577,13 @@ async def update_expense(expense_id: str, user_id: int, row_data: list):
                 return False
             await cur.execute("""
                 UPDATE expenses 
-                SET date=%s, amount=%s, expense_name=%s, category_id=%s, receipt_path=%s
+                SET date=%s, amount=%s, expense_name=%s, category_id=%s,
+                    receipt_path=%s, receipt_sha256=%s
                 WHERE id=%s AND telegram_id=%s
-            """, (date, amount, expense_name, cat_id, file_path, expense_id, user_id))
+            """, (
+                date, amount, expense_name, cat_id, file_path, receipt_hash,
+                expense_id, user_id,
+            ))
             if cur.rowcount == 0:
                 return False
             center_id = old['center_id']
