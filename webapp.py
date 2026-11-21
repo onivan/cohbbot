@@ -165,6 +165,9 @@ class BudgetData(BaseModel):
     category_id: str
     amount: float
 
+class BudgetAlertThresholdData(BaseModel):
+    threshold: float
+
 class AIModelData(BaseModel):
     name: str
     model_id: str
@@ -261,6 +264,23 @@ async def admin_page(request: Request):
         max_age=30 * 24 * 60 * 60
     )
     return response
+
+@app.get("/api/admin/settings/budget-alert-threshold")
+async def admin_get_budget_alert_threshold(current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    return {"status": "ok", "threshold": await database.get_budget_alert_threshold()}
+
+
+@app.put("/api/admin/settings/budget-alert-threshold")
+async def admin_set_budget_alert_threshold(data: BudgetAlertThresholdData,
+                                           current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    try:
+        threshold = await database.set_budget_alert_threshold(data.threshold)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "threshold": threshold}
+
 
 @app.get("/api/admin/notifications")
 async def admin_get_notifications(status: Optional[str] = None, type: Optional[str] = None,
