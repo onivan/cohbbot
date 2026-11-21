@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: DOCS
+- branch: dev
+- since: 2026-11-21T15:14:30Z
+- note: Узгодити обов’язковий порядок commit → merge dev → push → staging acceptance у регламентах
 
 
 
