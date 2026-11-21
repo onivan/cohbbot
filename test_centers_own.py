@@ -14,7 +14,7 @@
   * HTTP: /api/user/{id}/role, /api/admin/centers, /api/admin/centers/summary
   * cache-busting: ?v=<mtime> у /static/js/*.js
   * права: звичайний юзер не має доступу до /api/admin/*
-  * H1 (відома діра): читання бюджетів чужого ЦН звичайним юзером
+  * H1: бюджети власного/чужого ЦН, доступ адміністратора та юзера без ЦН
 """
 import asyncio
 import json
@@ -30,7 +30,7 @@ BASE = os.environ.get('TEST_BASE_URL', 'http://127.0.0.1:8001')
 ADMIN_ID = int(os.environ['ADMIN_ID']) if os.environ.get('ADMIN_ID') else None
 MONTH = None  # None -> поточний місяць (як на головному екрані)
 
-_results = {'pass': 0, 'fail': 0, 'skip': 0, 'known': 0}
+_results = {'pass': 0, 'fail': 0, 'skip': 0}
 
 
 def check(name, cond, detail=''):
@@ -45,12 +45,6 @@ def check(name, cond, detail=''):
 def skip(name, why):
     _results['skip'] += 1
     print('  SKIP  %s  (%s)' % (name, why))
-
-
-def known_issue(name):
-    """Відома проблема з TODO.md: не валить тест, але й не мовчить."""
-    _results['known'] += 1
-    print('  KNOWN %s' % name)
 
 
 def http(path, user=None):
@@ -194,23 +188,36 @@ async def main():
     else:
         skip('негативні тести /api/admin/*', 'немає звичайного юзера у БД')
 
-    print('\n[8] H1 (відома діра, TODO H1): бюджети чужого ЦН')
-    foreign = None
-    if other and centers_all:
+    print('\n[8] H1: права на читання бюджетів ЦН')
+    month = MONTH or datetime.now().strftime('%Y-%m')
+    if other:
         own_other = database.get_cached_center_id(other)
-        foreign = [c['id'] for c in centers_all if int(c['id']) != int(own_other or -1)]
-        foreign = foreign[0] if foreign else None
-    if foreign:
-        status, _ = get_json('/api/budgets/center/%s?month=%s'
-                             % (foreign, MONTH or datetime.now().strftime('%Y-%m')),
-                             other)
-        if status == 200:
-            known_issue('H1: звичайний юзер %s читає бюджети ЦН %s (HTTP 200, очікується 403)'
-                        % (other, foreign))
+        status, _ = get_json('/api/budgets/center/%s?month=%s' % (own_other, month), other)
+        check('H1: юзер читає бюджети свого ЦН -> 200', status == 200, 'status=%s' % status)
+        foreign = next((c['id'] for c in centers_all if int(c['id']) != int(own_other)), None)
+        if foreign is not None:
+            status, _ = get_json('/api/budgets/center/%s?month=%s' % (foreign, month), other)
+            check('H1: бюджети чужого ЦН недоступні -> 403', status == 403, 'status=%s' % status)
         else:
-            check('H1: бюджети чужого ЦН недоступні (HTTP %s)' % status, status == 403, 'status=%s' % status)
+            skip('H1: бюджети чужого ЦН', 'немає чужого ЦН')
     else:
-        skip('H1: бюджети чужого ЦН', 'немає пари юзер/чужий ЦН')
+        skip('H1: бюджети свого/чужого ЦН', 'немає звичайного юзера з ЦН')
+
+    admin_foreign = next((c['id'] for c in centers_all
+                          if int(c['id']) != int(admin_center or -1)), None)
+    if admin_foreign is not None:
+        status, _ = get_json('/api/budgets/center/%s?month=%s' % (admin_foreign, month), admin)
+        check('H1: адмін читає бюджети чужого ЦН -> 200', status == 200, 'status=%s' % status)
+    else:
+        skip('H1: адмін читає бюджети чужого ЦН', 'немає чужого ЦН')
+
+    without_center = next((u for u in regulars if not database.get_cached_center_id(u)), None)
+    if without_center is not None and centers_all:
+        status, _ = get_json('/api/budgets/center/%s?month=%s'
+                             % (centers_all[0]['id'], month), without_center)
+        check('H1: юзер без ЦН не читає бюджети -> 403', status == 403, 'status=%s' % status)
+    else:
+        skip('H1: юзер без ЦН', 'немає юзера без ЦН або центрів')
 
     print('\n[9] HTTP: дані головного екрана')
     status, _ = get_json('/api/categories', admin)
@@ -222,8 +229,8 @@ async def main():
                              % (uid_center, MONTH or __import__('datetime').datetime.now().strftime('%Y-%m')), admin)
         check('/api/budgets/center -> 200', status == 200, 'status=%s' % status)
 
-    print('\n===== PASS: %d   FAIL: %d   SKIP: %d   KNOWN: %d ====='
-          % (_results['pass'], _results['fail'], _results['skip'], _results['known']))
+    print('\n===== PASS: %d   FAIL: %d   SKIP: %d ====='
+          % (_results['pass'], _results['fail'], _results['skip']))
 
     # акуратно закриваємо пул, щоб aiomysql не логував «Event loop is closed»
     pool = getattr(database, '_pool', None)

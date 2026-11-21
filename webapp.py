@@ -469,6 +469,10 @@ async def admin_update_center(center_id: int, data: CenterUpdateData, current_us
 
 @app.get("/api/budgets/center/{center_id}")
 async def get_center_budgets_ep(center_id: int, month: str, current_user: int = Depends(get_current_user)):
+    if not database.is_admin(current_user):
+        own_center_id = database.users_cache.get(str(current_user), {}).get("center_id")
+        if not own_center_id or int(own_center_id) != center_id:
+            raise HTTPException(status_code=403, detail="Доступ заборонено")
     budgets = await database.get_center_budgets(center_id, month)
     return {"status": "ok", "data": budgets}
 
