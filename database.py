@@ -363,6 +363,15 @@ async def set_center_category(center_id: int, category_id: str, is_enabled: bool
 # 3. ВИТРАТИ
 # ==========================================
 
+def _notify_budget_safe(center_id, category_id, day, expense_id):
+    """B2: збій запуску сповіщення не скасовує вже збережену витрату."""
+    try:
+        import budget_notify
+        budget_notify.after_expense(center_id, category_id, day, expense_id)
+    except Exception:
+        logging.exception("Не вдалося запустити перевірку ліміту ЦН %s", center_id)
+
+
 async def add_expense(row_data: list) -> str:
     date, user_id, amount, expense_name, cat_input, file_path = row_data
     cat_id = await get_category_id_by_name(cat_input, user_id)
@@ -392,6 +401,7 @@ async def add_expense(row_data: list) -> str:
             """, (expense_id, date, user_id, center_id, amount, expense_name, cat_id, file_path))
             
     await _touch_cash_safe(center_id, date, reason=f"витрату додано ({expense_id})")
+    _notify_budget_safe(center_id, cat_id, date, expense_id)
     return expense_id
 
 async def update_expense(expense_id: str, user_id: int, row_data: list):
@@ -2327,6 +2337,7 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
 
     if decision == 'approved':
         await _touch_cash_safe(center_id, receipt_date, reason=f"чек погоджено адміном ({expense_id})")
+        _notify_budget_safe(center_id, category_id, receipt_date, expense_id)
 
     return {
         'already_decided': False,

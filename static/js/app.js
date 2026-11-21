@@ -236,6 +236,7 @@ function checkUserRole() {
             updateActionButtons();
             // loadExpenses() сам вирішує: зведення по центрах чи список витрат
             loadExpenses();
+            if (currentUserRole !== 'admin') openBudgetNotificationLink();
         })
         .catch(err => {
             console.error("Error fetching user role:", err);
@@ -371,7 +372,33 @@ function loadCentersForAdminFilter() {
                 select.value = prevValue;
             }
             container.style.display = 'flex';
+            openBudgetNotificationLink();
         });
+}
+
+let budgetNotificationOpened = false;
+
+function openBudgetNotificationLink() {
+    if (budgetNotificationOpened || urlParams.get('view') !== 'limits') return;
+    budgetNotificationOpened = true;
+    const centerId = Number(urlParams.get('budget_center'));
+    const month = urlParams.get('budget_month') || '';
+    if (!Number.isInteger(centerId) || centerId <= 0 || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return;
+    if (currentUserRole === 'admin') {
+        const select = document.getElementById('main-center-filter');
+        if (!select || !Array.from(select.options).some(o => Number(o.value) === centerId)) {
+            alert('ЦН зі сповіщення більше не доступний.');
+            return;
+        }
+        select.value = String(centerId);
+    } else if (centerId !== currentUserCenterId) {
+        alert('Доступ лише до лімітів свого ЦН.');
+        return;
+    }
+    document.getElementById('main-month-filter').value = month;
+    document.getElementById('my-budget-month').value = month;
+    loadExpenses();
+    openMyBudgetModal();
 }
 
 let allExpenses = [];      
@@ -528,8 +555,11 @@ function loadMyBudget() {
                     remainingDisplay = remaining < 0 ? 'Перевитрата: ' + Math.abs(remaining).toFixed(0) + ' грн' : 'Залишок: ' + remaining.toFixed(0) + ' грн';
                 }
                 
+                const highlighted = urlParams.get('budget_category') === cleanCatId
+                    && urlParams.get('budget_month') === month
+                    && Number(urlParams.get('budget_center')) === Number(centerId);
                 html += `
-                    <div style="margin-bottom: 12px;">
+                    <div data-budget-category="${cashEsc(cleanCatId)}" style="margin-bottom: 12px; ${highlighted ? 'outline: 2px solid #F44336; padding: 6px; border-radius: 4px;' : ''}">
                         <div style="display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 4px;">
                             <strong>${catName}</strong>
                             <span>${spent.toFixed(0)} / ${plannedDisplay}</span>
@@ -564,6 +594,9 @@ function loadMyBudget() {
                     </div>
                 `;
                 list.innerHTML = html;
+                const target = Array.from(list.querySelectorAll('[data-budget-category]'))
+                    .find(el => el.dataset.budgetCategory === urlParams.get('budget_category'));
+                if (target) target.scrollIntoView({ block: 'nearest' });
             }
         })
         .catch(err => {

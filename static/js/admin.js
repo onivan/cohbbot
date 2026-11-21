@@ -362,6 +362,19 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 // ==========================================
 const notificationsPage = { limit: 50, offset: 0, total: 0 };
 
+function budgetNotificationLink(notification) {
+    const payload = notification.payload || {};
+    const centerId = Number(notification.center_id);
+    if (notification.type !== 'budget_overrun' || !Number.isInteger(centerId) || centerId <= 0
+            || !/^\d{4}-(0[1-9]|1[0-2])$/.test(payload.month || '') || !payload.category_id) return '';
+    const query = new URLSearchParams({
+        view: 'limits', budget_center: String(centerId),
+        budget_month: payload.month, budget_category: payload.category_id
+    });
+    if (userId) query.set('user_id', userId);
+    return `<a class="btn-mini" href="/?${cashEsc(query.toString())}">Ліміти ЦН</a>`;
+}
+
 async function loadNotifications(resetPage = false) {
     if (resetPage) notificationsPage.offset = 0;
     // Якщо після зміни фільтра/статусу сторінка «випала» за межі — повертаємось на останню.
@@ -402,7 +415,7 @@ async function loadNotifications(resetPage = false) {
     }
     rows.forEach(n => {
         const tr = document.createElement('tr');
-        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс'})[n.type] || n.type;
+        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс', budget_overrun:'Перевитрата ліміту'})[n.type] || n.type;
         const receipt = n.receipt_path
             ? `<button type="button" class="btn-mini" style="background: #2196F3;" data-receipt-url="${cashEsc(n.receipt_path)}" data-receipt-title="${cashEsc('Чек: ' + (n.user_name || n.user_id || n.id))}" onclick="openReceiptFromButton(this)">📄 Переглянути чек</button>`
             : '';
@@ -416,7 +429,7 @@ async function loadNotifications(resetPage = false) {
         const readAction = n.read_at
             ? `<button class="btn-mini" onclick="setNotificationRead(${n.id}, false)">Позначити непрочитаним</button>`
             : `<button class="btn-mini" onclick="setNotificationRead(${n.id}, true)">Позначити прочитаним</button>`;
-        const actions = [receipt, chat, receiptDecision, readAction, n.status === 'open'
+        const actions = [receipt, chat, receiptDecision, budgetNotificationLink(n), readAction, n.status === 'open'
             ? `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'resolved')">Опрацьовано</button>`
             : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
         const actionLabels = {pending:'Очікує рішення', approved:'Погоджено', rejected:'Відхилено', resolved:'Опрацьовано'};
