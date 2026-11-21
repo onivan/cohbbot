@@ -138,7 +138,9 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
                 self.spent.return_value = spent
                 await self.notify(amount=amount)
         self.claim.assert_not_awaited()
-        self.journal.assert_not_awaited()
+        self.assertEqual([call.kwargs['type'] for call in self.journal.await_args_list],
+                         ['budget_overrun'])
+        self.assertEqual([call.args[0] for call in self.send.await_args_list], [1, 6])
 
     async def test_duplicate_threshold_claim_suppresses_admin_message_and_event(self):
         self.spent.return_value = 95

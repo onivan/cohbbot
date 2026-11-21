@@ -78,6 +78,7 @@ class BudgetAlertSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.connection.commit.assert_not_awaited()
 
     async def test_failed_journal_insert_rolls_back_antispam_claim(self):
+        self.cursor.rowcount = 1
         self.cursor.execute.side_effect = [None, RuntimeError('journal insert failed')]
         with self.assertRaises(RuntimeError):
             await database.claim_budget_alert(
