@@ -127,7 +127,7 @@ class BudgetNotifyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claim['payload']['expense_id'], 'exp_test')
         notify_admins.assert_awaited_once()
         self.assertIn('Досягнуто 90% ліміту', notify_admins.call_args.args[0])
-        self.assertEqual([call.args[0] for call in self.send.await_args_list], [1, 2])
+        self.assertEqual([call.args[0] for call in self.send.await_args_list], [1, 6])
         self.assertTrue(all('Досягнуто 90% ліміту' in call.args[1]
                             for call in self.send.await_args_list))
 

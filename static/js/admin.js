@@ -362,6 +362,14 @@ async function toggleMatrix(centerId, categoryId, isEnabled) {
 // ЖУРНАЛ АДМІНСЬКИХ СПОВІЩЕНЬ
 // ==========================================
 const notificationsPage = { limit: 50, offset: 0, total: 0 };
+const NOTIFICATION_TYPE_META = {
+    invalid_receipt: { label: 'Невалідний чек', color: '#d32f2f' },
+    cash_operation: { label: 'Операція з коштами', color: '#1976d2' },
+    negative_balance: { label: 'Мінусовий баланс', color: '#8e24aa' },
+    budget_overrun: { label: 'Перевитрата ліміту', color: '#ef6c00' },
+    budget_threshold: { label: 'Досягнуто порогу ліміту', color: '#00897b' }
+};
+
 
 function budgetNotificationLink(notification) {
     const payload = notification.payload || {};
@@ -417,7 +425,9 @@ async function loadNotifications(resetPage = false) {
     }
     rows.forEach(n => {
         const tr = document.createElement('tr');
-        const typeLabel = ({invalid_receipt:'Невалідний чек', cash_operation:'Операція з коштами', negative_balance:'Мінусовий баланс', budget_overrun:'Перевитрата ліміту', budget_threshold:'Досягнуто порогу ліміту'})[n.type] || n.type;
+        const typeMeta = NOTIFICATION_TYPE_META[n.type] || { label: n.type, color: '#757575' };
+        const typeLabel = typeMeta.label;
+        const typeMarker = `<span aria-hidden="true" style="display:inline-block;width:10px;height:10px;background:${typeMeta.color};border-radius:2px;margin-right:6px;vertical-align:middle;"></span>`;
         const receipt = n.receipt_path
             ? `<button type="button" class="btn-mini" style="background: #2196F3;" data-receipt-url="${cashEsc(n.receipt_path)}" data-receipt-title="${cashEsc('Чек: ' + (n.user_name || n.user_id || n.id))}" onclick="openReceiptFromButton(this)">📄 Переглянути чек</button>`
             : '';
@@ -434,13 +444,13 @@ async function loadNotifications(resetPage = false) {
         const actions = [receipt, chat, receiptDecision, budgetNotificationLink(n), readAction, n.status === 'open'
             ? `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'resolved')">Опрацьовано</button>`
             : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
-        const actionLabels = {pending:'Очікує рішення', approved:'Погоджено', rejected:'Відхилено', resolved:'Опрацьовано'};
+        const actionLabels = {pending:'Очікує рішення', approved:'✅ Погоджено', rejected:'❌ Відхилено', resolved:'✅ Опрацьовано'};
         const readLabel = n.read_at ? `Прочитане${n.read_by ? ` адміністратором #${cashEsc(n.read_by)}` : ''}` : 'Непрочитане';
-        const actionLabel = n.canceled_by_user
-            ? 'Скасовано автором'
+                const actionLabel = n.canceled_by_user
+            ? '🚫 Скасовано автором'
             : (actionLabels[actionStatus] || actionStatus);
         tr.innerHTML = `<td style="white-space:nowrap;">${cashEsc(n.created_at || '')}</td>
-            <td><b>${cashEsc(typeLabel)}: ${cashEsc(n.title)}</b><div style="white-space:pre-wrap;font-size:12px;margin-top:4px;">${cashEsc(n.message)}</div>
+            <td>${typeMarker}<b>${cashEsc(typeLabel)}: ${cashEsc(n.title)}</b><div style="white-space:pre-wrap;font-size:12px;margin-top:4px;">${cashEsc(n.message)}</div>
             <div style="font-size:11px;color:#888;">${n.status === 'open' ? 'Відкрите' : 'Опрацьоване'}</div></td>
             <td>${cashEsc(n.center_name || '—')}</td><td>${cashEsc(n.user_name || n.user_id || '—')}</td>
             <td><div>${cashEsc(actionLabel)}</div><div style="font-size:11px;color:#888;">${readLabel}</div></td><td>${actions}</td>`;

@@ -210,11 +210,13 @@
             <select id="notification-status" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Усі стани</option><option value="open">Відкриті</option><option value="resolved">Опрацьовані</option>
             </select>
-                        <select id="notification-type" onchange="loadNotifications(true)" style="padding:7px;">
-                <option value="">Усі типи</option><option value="invalid_receipt">Невалідний чек</option>
-                <option value="cash_operation">Операція з коштами</option><option value="negative_balance">Мінусовий баланс</option>
-                <option value="budget_overrun">Перевитрата ліміту</option>
-                <option value="budget_threshold">Досягнуто порогу ліміту</option>
+            <select id="notification-type" onchange="loadNotifications(true)" style="padding:7px;">
+                <option value="">Усі типи</option>
+                <option value="invalid_receipt">🟥 Невалідний чек</option>
+                <option value="cash_operation">🟦 Операція з коштами</option>
+                <option value="negative_balance">🟪 Мінусовий баланс</option>
+                <option value="budget_overrun">🟧 Перевитрата ліміту</option>
+                <option value="budget_threshold">🟩 Досягнуто порогу ліміту</option>
             </select>
             <select id="notification-read" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Прочитаність: усі</option><option value="false">Непрочитані</option><option value="true">Прочитані</option>
