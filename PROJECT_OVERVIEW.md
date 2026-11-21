@@ -108,7 +108,7 @@ receipts/            # Завантажені фото чеків (створю�
 - **`categories`** — глобальний довідник (`id` VARCHAR як `cat_xxx`, `name` UNIQUE, `sort_order`, `is_active`).
 - **`center_categories`** — **матриця** «які категорії дозволені якому ЦН» (PK: center_id+category_id).
 - **`expenses`** — `id` VARCHAR, `date`, `telegram_id` (FK), `center_id` (FK), `amount` DECIMAL,
-  `expense_name`, `category_id` (FK), `receipt_path`, `created_at`.
+  `expense_name`, `category_id` (FK), `receipt_path`, `receipt_sha256` (nullable SHA-256 байтів файла чека), `created_at`. Хеш індексується разом із `center_id`; для старих рядків може бути `NULL` до лінивого заповнення серед кандидатів із тим самим ЦН і сумою.
 - **`budgets`** — бюджет на категорію/ЦН/місяць (`month` = `YYYY-MM`, UNIQUE center+category+month).
 - **`api_logs`** — логи токенів Gemini (`input_tokens`, `output_tokens`, `estimated_cost`).
 - **`auth_codes`** — одноразові 6-значні коди для входу в браузер (`expires_at`, `is_used`).

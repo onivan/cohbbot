@@ -58,6 +58,9 @@ async def main():
     except Exception as e:
         logging.error(f"Не вдалося ініціалізувати схему бюджетних сповіщень: {e}")
 
+    # 0.4 Хеші чеків для пошуку дублів — обов'язкова схема для запису витрат.
+    await database.ensure_duplicate_expense_schema()
+
     # 1. Завантажуємо користувачів із MySQL
 
     await database.load_users()

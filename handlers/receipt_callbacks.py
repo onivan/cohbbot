@@ -6,8 +6,8 @@ from aiogram.fsm.context import FSMContext
 
 from database import (
     users_cache, add_expense, find_duplicate_expense, get_category_id_by_name,
-    get_user_center_id, build_category_formula, decide_invalid_receipt,
-    close_invalid_receipt_by_user,
+    get_user_center_id, receipt_sha256, build_category_formula,
+    decide_invalid_receipt, close_invalid_receipt_by_user,
 )
 
 from bot_setup import bot
@@ -54,12 +54,16 @@ async def process_callback(callback_query: types.CallbackQuery, state: FSMContex
     else:
         receipt_date = str(receipt_date).strip().split(' ')[0]
     category_name = data.get('category', 'Інше')
+    receipt_hash = None
+    if callback_query.data in ("receipt_save", "receipt_save_anyway"):
+        receipt_hash = await receipt_sha256(user_id, data.get('file_path', ''))
 
     if callback_query.data == "receipt_save":
         category_id = await get_category_id_by_name(category_name, user_id)
         center_id = await get_user_center_id(user_id) or 1
         duplicate = await find_duplicate_expense(
-            center_id, receipt_date, data['amount'], category_id, data['expense_name']
+            center_id, receipt_date, data['amount'], category_id, data['expense_name'],
+            receipt_hash=receipt_hash,
         )
         if duplicate:
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -89,7 +93,7 @@ async def process_callback(callback_query: types.CallbackQuery, state: FSMContex
             category_name,
             data.get('file_path', ''),
         ]
-        await add_expense(row_data)
+        await add_expense(row_data, receipt_hash=receipt_hash)
         await callback_query.message.edit_text(
             f"✅ Збережено: **{data['amount']} грн** за {receipt_date} у «{category_name}».",
             parse_mode="Markdown",
