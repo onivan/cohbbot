@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: -
-- task: -
-- branch: dev
-- since: -
-- note: E1 integrated in dev; staging deployment, reportlab install, and E1 acceptance are pending.
+- state: BUSY
+- owner: ws-ubuntu
+- task: E1 (Telegram mobile PDF download fix)
+- branch: fix/e1-telegram-download
+- since: 2026-11-22T19:53:23Z
+- note: Diagnose Telegram WebView PDF delivery and add a mobile-compatible way to open/save reports.
 
 
 
