@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: E1 (PDF report)
+- branch: feat/e1-pdf-report
+- since: 2026-11-22T13:31:27Z
+- note: Implement report endpoint/UI/access checks/tests; keep dev deployable.
 
 
 
