@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: TODO section ordering (K after J)
+- branch: dev
+- since: 2026-11-22T13:03:08Z
+- note: Move K section after J in TODO; commit and release lock.
 
 
 
