@@ -1,0 +1,7 @@
+# Copy to browser_tests/e1-staging-config and replace with staging test accounts.
+E1_STAGING_URL=https://staging.example.invalid
+E1_USER_ID=100000001
+E1_USER_CENTER_ID=1
+E1_FOREIGN_CENTER_ID=2
+E1_ADMIN_ID=100000002
+E1_MONTH=2026-11

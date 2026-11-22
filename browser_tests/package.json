@@ -1,0 +1,11 @@
+{
+  "name": "cohbbot-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "playwright test e1_pdf.spec.js",
+    "test:e1": "npm test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

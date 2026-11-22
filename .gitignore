@@ -11,7 +11,9 @@ client_secrets.json
 .vps.env
 *.json
 
-# Виключення: якщо у вас є якийсь публічний json-файл, внесіть його окремо з '!'
+# Браузерні тести — комітимо лише конфіг і lockfile без облікових даних.
+!browser_tests/package.json
+!browser_tests/package-lock.json
 
 # Віртуальне середовище Python
 venv/
@@ -39,6 +41,10 @@ receipts/
 
 # Тимчасові файли (скріншоти, чернетки тестів)
 tmp/
+browser_tests/e1-staging-config
+browser_tests/node_modules/
+browser_tests/test-results/
+browser_tests/playwright-report/
 
 # Ідентифікатор робочого місця (локальний, різний на кожній машині — див. docs/DEV_WORKFLOW_2WS.md)
 .workstation
