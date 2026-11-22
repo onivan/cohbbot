@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: C1 (документаційне закриття після staging acceptance)
+- branch: dev
+- since: 2026-11-22T12:40:27Z
+- note: Зафіксувати підтверджену користувачем успішну перевірку C1 та звільнити лок.
 
 
 
