@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: E1 (Telegram mobile PDF download fix)
-- branch: fix/e1-telegram-download
-- since: 2026-11-22T19:53:23Z
-- note: Diagnose Telegram WebView PDF delivery and add a mobile-compatible way to open/save reports.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -272,3 +272,11 @@
 - Локально: `py_compile`, `node --check`, `git diff --check` пройшли; 11 ізольованих backend-тестів пройшли; PDF smoke підтвердив A4, український текст і загальну суму. Playwright лише завантажено/перелічено (`--list`), реальні staging-сценарії не виконувалися; інтеграційний SQL-тест також очікує staging DB.
 - Ручні кроки користувача: задеплоїти `dev` через `./deploy.sh`, перевірити `make status` і VPS HEAD=`7230991`; установити залежності у staging venv (`/home/onivan/cohbbot-dev/venv/bin/pip install -r /home/onivan/cohbbot-dev/requirements.txt`). Скопіювати `browser_tests/e1-staging-config.example` у `browser_tests/e1-staging-config`, заповнити тестовими активними user/admin IDs та іншим ЦН; у `browser_tests/` виконати `npm ci` і `npx playwright install chromium`; після цього запустити `make test`.
 - E1 лишається відкритою до успішного `make test` і підтвердження staging acceptance; браузерні дії read-only. Після E1 перейти до A5. Лок звільнено.
+
+### 2026-11-22T20:32Z · E1 · Telegram mobile download fix · ws-ubuntu → передача на staging
+- Коміт `744cc66` (`fix(reports): support Telegram native PDF downloads`) злито в `dev`; merge-коміт `b837a20` запушено в `origin/dev`.
+- У Telegram WebView на сумісних версіях використовується `WebApp.downloadFile()` із короткоживучим підписаним посиланням (5 хвилин); endpoint повторно перевіряє доступ до ЦН, повертає PDF як attachment і ставить `no-store`. Інші клієнти лишаються на попередньому завантаженні.
+- Додано backend-тести для підписаного/обмеженого посилання і Playwright-сценарій нативного Telegram download flow.
+- Локально пройшли `py_compile` (`webapp.py`, `test_report_pdf.py`), `node --check` (`static/js/app.js`, `browser_tests/e1_pdf.spec.js`) і `git diff --check`. `test_report_pdf` локально не запустився: відсутній `aiomysql`. Staging-деплой, `make test` та ручне Telegram acceptance не виконувались.
+- Наступний крок користувача: `./deploy.sh`, потім `make status` і підтвердити staging HEAD=`b837a20`, виконати `make test`; вручну перевірити завантаження PDF у Telegram WebView на телефоні (нативний prompt відкрити/зберегти), у звичайному браузері та перевірити, що звичайний користувач не може завантажити звіт чужого ЦН. Для Playwright потрібні конфіг та залежності з попереднього E1 запису.
+- E1 лишається відкритою до успішних автоматичних тестів і підтвердження ручного staging acceptance. Лок звільнено.
