@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: MVP scope update (E1 + A5; defer others)
+- branch: dev
+- since: 2026-11-22T13:07:56Z
+- note: Update TODO and pre-release plan for agreed MVP scope; then release lock.
 
 
 
