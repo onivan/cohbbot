@@ -1,5 +1,4 @@
 import os
-
 import io
 import asyncio
 import logging
@@ -22,6 +21,7 @@ from config import WEBAPP_URL, DEBUG_DIAGNOSTICS
 from database import (
     users_cache, get_categories, load_users, log_api_usage,
     get_active_ai_model, set_invalid_receipt_amount,
+    find_duplicate_receipt_hash, receipt_bytes_sha256,
 )
 
 from telegram_notifications import notify_admins, update_invalid_receipt_notification
@@ -157,21 +157,65 @@ async def render_summary(message_obj: types.Message, data: dict, state: FSMConte
     else:
         await message_obj.answer(text, parse_mode="Markdown", reply_markup=kb)
 
+@router.callback_query(
+    F.data.in_(["duplicate_receipt:recognize", "duplicate_receipt:cancel"]),
+    ReceiptState.waiting_for_duplicate_receipt,
+)
+async def resolve_duplicate_receipt(callback_query: types.CallbackQuery, state: FSMContext):
+    """Скасовує дубль або запускає AI лише після явної згоди користувача."""
+    data = await state.get_data()
+    if callback_query.data == "duplicate_receipt:cancel":
+        await state.clear()
+        await callback_query.message.edit_text(
+            "🚫 Перевірку ШІ скасовано: витрату не створено, токени не витрачено."
+        )
+        await callback_query.answer("Скасовано.")
+        return
+
+    photo_file_id = data.get('duplicate_receipt_file_id')
+    if not photo_file_id:
+        await state.clear()
+        await callback_query.message.edit_text("Не вдалося повторно відкрити чек. Надішліть його ще раз.")
+        await callback_query.answer("Чек не знайдено.", show_alert=True)
+        return
+
+    user_id = callback_query.from_user.id
+    await state.clear()
+    await callback_query.message.edit_text("✅ Продовжую перевірку через ШІ…")
+    await callback_query.answer("Запускаю перевірку ШІ.")
+    await process_receipt_photo_file(
+        callback_query.message, state, user_id=user_id,
+        photo_file_id=photo_file_id, bypass_duplicate_check=True,
+    )
+
+
 @router.message(F.photo)
 async def process_receipt_photo(message: types.Message, state: FSMContext):
-    """Обробка фото чека: розпізнавання, збереження та підготовка до підтвердження"""
+    await process_receipt_photo_file(message, state)
 
+
+async def process_receipt_photo_file(message: types.Message, state: FSMContext,
+                                     user_id: int = None, photo_file_id: str = None,
+                                     bypass_duplicate_check: bool = False):
+    """Обробляє завантажене фото; duplicate-confirmation може продовжити без повторного запиту."""
     current_state_data = await state.get_data()
     if current_state_data.get('invalid_receipt_draft'):
         await message.answer("Спочатку надішліть документ на перевірку або скасуйте поточну чернетку.")
+        return
+
+    if current_state_data.get('duplicate_receipt_pending') and not bypass_duplicate_check:
+        await message.answer("Спочатку підтвердьте або скасуйте перевірку знайденого дубля.")
         return
 
     if await state.get_state() == ReceiptState.waiting_for_invalid_receipt_amount.state:
         await message.answer("Спочатку надішліть суму витрати або скасуйте запит кнопкою під повідомленням.")
         return
 
-    user_id = message.from_user.id
-
+    user_id = user_id or message.from_user.id
+    photo_file_id = photo_file_id or (message.photo[-1].file_id if message.photo else None)
+    if not photo_file_id:
+        await message.answer("Не вдалося прочитати фото. Надішліть чек ще раз.")
+        return
 
     user_id_str = str(user_id)
 
@@ -191,16 +235,42 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
     msg = await message.answer("⏳ Читаю чек...")
     
     try:
-        # Завантажуємо зображення
-        photo = message.photo[-1]
-        file_info = await bot.get_file(photo.file_id)
+        # Спершу завантажуємо байти й перевіряємо SHA-256 — до будь-якого AI-виклику.
+        file_info = await bot.get_file(photo_file_id)
         downloaded_file = await bot.download_file(file_info.file_path)
-        
-        # Обробка зображення через Pillow у окремому потоці (синхронна операція)
-        image = await asyncio.to_thread(Image.open, io.BytesIO(downloaded_file.read()))
-        # Важливо завантажити дані зображення в пам'ять перед виходом з потоку
+        receipt_bytes = downloaded_file.read()
+        receipt_hash = receipt_bytes_sha256(receipt_bytes)
+        image = await asyncio.to_thread(Image.open, io.BytesIO(receipt_bytes))
         await asyncio.to_thread(image.load)
         
+        if not bypass_duplicate_check:
+            duplicate = await find_duplicate_receipt_hash(
+                int(user_info['center_id']), receipt_hash
+            )
+            if duplicate:
+                await state.set_state(ReceiptState.waiting_for_duplicate_receipt)
+                await state.update_data(
+                    duplicate_receipt_pending=True,
+                    duplicate_receipt_file_id=photo_file_id,
+                )
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="✅ Все одно перевірити через ШІ",
+                        callback_data="duplicate_receipt:recognize",
+                    )],
+                    [InlineKeyboardButton(
+                        text="❌ Скасувати", callback_data="duplicate_receipt:cancel"
+                    )],
+                ])
+                await msg.edit_text(
+                    "⚠️ Цей самий файл чека вже додано:\n"
+                    f"{duplicate['date']} · {duplicate['amount']:.2f} грн · "
+                    f"{duplicate['expense_name']}\n\n"
+                    "Перевірку ШІ ще не запускали. Продовжити?",
+                    reply_markup=keyboard,
+                )
+                return
+
         # Отримуємо список категорій користувача з бази
         raw_categories = await get_categories(user_id)
         
@@ -274,7 +344,8 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
                 file_name = f"{now:%Y-%m-%d_%H-%M-%S}_invalid-{uuid.uuid4().hex[:6]}.jpg"
                 local_path = f"{folder_path}/{file_name}"
                 await asyncio.to_thread(image.convert('RGB').save, local_path, 'JPEG', quality=90)
-                receipt_path = f"{WEBAPP_URL}/{local_path}"
+
+                receipt_path = f"{WEBAPP_URL.rstrip('/')}/{local_path.lstrip('/')}"
             except Exception as e:
                 logging.error(f"Не вдалося зберегти невалідний документ: {e}")
 
@@ -367,7 +438,8 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
     local_path = f"{folder_path}/{file_name}"
     
     await bot.download_file(file_info.file_path, destination=local_path)
-    local_url = f"{WEBAPP_URL}/{local_path}"
+
+    local_url = f"{WEBAPP_URL.rstrip('/')}/{local_path.lstrip('/')}"
 
     # Зберігаємо отримані дані у пам'ять FSM
     await state.update_data(
@@ -377,6 +449,7 @@ async def process_receipt_photo(message: types.Message, state: FSMContext):
         receipt_date=receipt_date, 
         file_path=local_url,
         local_fs_path=local_path, # Зберігаємо локальний шлях для безпечного видалення при скасуванні
+        receipt_sha256=receipt_hash,
         valid_categories=valid_categories,
         date_not_found=date_not_found
     )                             

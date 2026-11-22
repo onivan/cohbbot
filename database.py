@@ -387,6 +387,11 @@ def _sha256_file(file_path: str) -> str:
     return digest.hexdigest()
 
 
+def receipt_bytes_sha256(receipt_bytes: bytes) -> str:
+    """SHA-256 вже завантажених байтів фото (для перевірки до AI)."""
+    return hashlib.sha256(receipt_bytes).hexdigest()
+
+
 async def receipt_sha256(user_id: int, receipt_path: str) -> str | None:
     """Хешує лише наявний локальний чек із receipts/{user_id}/; довільні шляхи відхиляє."""
     if not user_id or not receipt_path:
@@ -424,6 +429,86 @@ async def ensure_duplicate_expense_schema():
                     # MySQL/MariaDB: колонка/індекс уже існує.
                     if getattr(error, 'args', (None,))[0] not in (1060, 1061, 1831):
                         raise
+
+
+async def backfill_center_receipt_hashes(center_id: int) -> int:
+    """Ліниво хешує legacy-фото одного ЦН пакетами, не блокуючи event loop."""
+    if not center_id:
+        return 0
+    pool = await get_pool()
+    last_id = ''
+    updated_count = 0
+    while True:
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """SELECT id, telegram_id, receipt_path FROM expenses
+                       WHERE center_id = %s AND id > %s AND receipt_sha256 IS NULL
+                         AND receipt_path IS NOT NULL AND receipt_path <> ''
+                       ORDER BY id LIMIT 250""",
+                    (center_id, last_id),
+                )
+                rows = await cur.fetchall() or []
+        if not rows:
+            break
+        last_id = rows[-1]['id']
+
+        updates = []
+        for start in range(0, len(rows), 8):
+            batch = rows[start:start + 8]
+            hashes = await asyncio.gather(*(
+                receipt_sha256(row['telegram_id'], row['receipt_path']) for row in batch
+            ))
+            updates.extend(
+                (digest, row['id']) for row, digest in zip(batch, hashes) if digest
+            )
+        if updates:
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """UPDATE expenses SET receipt_sha256 = %s
+                           WHERE id = %s AND receipt_sha256 IS NULL""",
+                        updates,
+                    )
+            updated_count += len(updates)
+    return updated_count
+
+
+async def backfill_existing_receipt_hashes() -> int:
+    """Одноразово заповнює доступні legacy-хеші при запуску, окремо по ЦН."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT DISTINCT center_id FROM expenses
+                   WHERE receipt_sha256 IS NULL AND receipt_path IS NOT NULL
+                     AND receipt_path <> '' ORDER BY center_id"""
+            )
+            center_rows = await cur.fetchall() or []
+    total = 0
+    for row in center_rows:
+        center_id = row.get('center_id') if isinstance(row, dict) else row[0]
+        total += await backfill_center_receipt_hashes(center_id)
+    return total
+
+
+async def find_duplicate_receipt_hash(center_id: int, receipt_hash: str):
+    """Швидко знаходить тотожні байти чека до запуску AI-розпізнавання."""
+    receipt_hash = _normalize_receipt_hash(receipt_hash)
+    if not center_id or not receipt_hash:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """SELECT id, date, amount, expense_name, category_id
+                   FROM expenses
+                   WHERE center_id = %s AND receipt_sha256 = %s
+                   ORDER BY created_at DESC LIMIT 1""",
+                (center_id, receipt_hash),
+            )
+            row = await cur.fetchone()
+    return _duplicate_expense_result(row)
 
 
 def _duplicate_expense_result(row):
@@ -468,7 +553,7 @@ async def find_duplicate_expense(center_id: int, date, amount, category_id: str,
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    """SELECT id, date, amount, expense_name, category_id
+                    """SELECT id, date, amount, expense_name, category_id, receipt_path
                        FROM expenses
                        WHERE center_id = %s AND receipt_sha256 = %s
                        ORDER BY created_at DESC LIMIT 1""",
@@ -511,7 +596,7 @@ async def find_duplicate_expense(center_id: int, date, amount, category_id: str,
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
-                """SELECT id, date, amount, expense_name, category_id
+                """SELECT id, date, amount, expense_name, category_id, receipt_path
                    FROM expenses
                    WHERE center_id = %s AND date = %s AND amount = %s
                      AND category_id = %s
@@ -2497,6 +2582,14 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
     if decision not in ('approved', 'rejected'):
         raise ValueError('Невідоме рішення щодо чека')
 
+    receipt_hash = None
+    if decision == 'approved':
+        pending_event = await get_admin_notification(notification_id)
+        if pending_event and pending_event.get('user_id') and pending_event.get('receipt_path'):
+            receipt_hash = await receipt_sha256(
+                int(pending_event['user_id']), pending_event['receipt_path']
+            )
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.begin()
@@ -2587,10 +2680,12 @@ async def decide_invalid_receipt(notification_id: int, decision: str, actor_id: 
                     expense_id = f"exp_{int(time.time() * 1000)}_{user_id}_{uuid.uuid4().hex[:4]}"
                     await cur.execute(
                         """INSERT INTO expenses
-                               (id, date, telegram_id, center_id, amount, expense_name, category_id, receipt_path)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                               (id, date, telegram_id, center_id, amount, expense_name,
+                                category_id, receipt_path, receipt_sha256)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                         (expense_id, receipt_date, user_id, center_id, amount,
-                         expense_name, category_id, notification.get('receipt_path'))
+                         expense_name, category_id, notification.get('receipt_path'),
+                         _normalize_receipt_hash(receipt_hash))
                     )
 
                 payload['decision'] = decision

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Response
+
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -661,6 +662,27 @@ def _owned_receipt_url(user_id: int, supplied_url: str) -> str:
         )
 
     return f"{WEBAPP_URL.rstrip('/')}/{relative_path}"
+
+
+@app.post("/api/receipts/check-duplicate")
+async def check_web_receipt_duplicate(data: ReceiptRecognitionData,
+                                      current_user: int = Depends(get_current_user)):
+    """Перевіряє SHA чека до AI-виклику, щоб не витрачати токени на відомий дубль."""
+    receipt_url = _owned_receipt_url(current_user, data.file_path.strip())
+    user_info = database.users_cache.get(str(current_user), {})
+    if not user_info:
+        await database.load_users()
+        user_info = database.users_cache.get(str(current_user), {})
+    center_id = user_info.get("center_id") or await database.get_user_center_id(current_user)
+    if user_info.get("status", "pending") != "active" or not center_id:
+        raise HTTPException(status_code=403, detail="Обліковий запис не активовано або не призначено Центр Надії")
+
+    receipt_hash = await database.receipt_sha256(current_user, receipt_url)
+    duplicate = (
+        await database.find_duplicate_receipt_hash(int(center_id), receipt_hash)
+        if receipt_hash else None
+    )
+    return {"status": "ok", "duplicate": duplicate}
 
 
 @app.post("/api/receipts/recognize")

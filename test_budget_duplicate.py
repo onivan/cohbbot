@@ -60,6 +60,14 @@ class FindDuplicateExpenseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('center_id = %s AND receipt_sha256 = %s', ' '.join(sql.split()))
         self.assertEqual(params, (7, receipt_hash))
 
+    async def test_pre_ai_hash_lookup_checks_only_center_and_content_hash(self):
+        receipt_hash = 'c' * 64
+        result = await database.find_duplicate_receipt_hash(7, receipt_hash)
+        self.assertEqual(result['expense_id'], 'exp_existing')
+        sql, params = self.cursor.execute.call_args.args
+        self.assertIn('center_id = %s AND receipt_sha256 = %s', ' '.join(sql.split()))
+        self.assertEqual(params, (7, receipt_hash))
+
     async def test_legacy_same_amount_candidate_is_hashed_and_matched(self):
         self.cursor.fetchone.side_effect = [None]
         self.cursor.fetchall.return_value = [{

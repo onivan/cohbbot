@@ -1294,6 +1294,15 @@ let recognizedNonReceipt = false;
 let recognizedDocumentType = 'невідомий документ';
 let uploadedReceiptFile = null;
 let recognitionCategoryId = '';
+let receiptDuplicateDeclinedPath = '';
+let receiptDuplicateBypassPath = '';
+
+function confirmDuplicateReceipt(message) {
+    if (tg && typeof tg.showConfirm === 'function') {
+        return new Promise(resolve => tg.showConfirm(message, resolve));
+    }
+    return Promise.resolve(window.confirm(message));
+}
 
 function setReceiptAiStatus(message, kind = 'info') {
     const status = document.getElementById('receipt-ai-status');
@@ -1323,7 +1332,7 @@ async function onReceiptFileSelected() {
     recognizedNonReceipt = false;
     recognitionCategoryId = '';
     updateExpenseSaveButton();
-    setReceiptAiStatus('Завантаження та перевірка документа через ШІ…');
+    setReceiptAiStatus('Завантаження чека…');
     const saveButton = document.getElementById('btn-save-expense');
     if (saveButton) saveButton.disabled = true;
 
@@ -1344,6 +1353,37 @@ async function onReceiptFileSelected() {
             fileInput.style.display = 'none';
         }
 
+        if (receiptDuplicateDeclinedPath === currentPath) {
+            setReceiptAiStatus('Перевірку ШІ скасовано: витрату не додано. Видаліть або замініть чек, щоб почати знову.', 'warning');
+            return;
+        }
+
+        if (receiptDuplicateBypassPath !== currentPath) {
+            const duplicateResponse = await fetch('/api/receipts/check-duplicate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: currentPath })
+            });
+            const duplicateResult = await duplicateResponse.json();
+            if (!duplicateResponse.ok || duplicateResult.status !== 'ok') {
+                throw new Error(duplicateResult.detail || 'Не вдалося перевірити чек на дубль.');
+            }
+            if (duplicateResult.duplicate) {
+                const existing = duplicateResult.duplicate;
+                const prompt = 'Схоже, цей самий чек уже додано:' + '\n' +
+                    `${existing.date || ''} · ${Number(existing.amount || 0).toFixed(2)} грн · ` +
+                    `${existing.expense_name || ''}\n\nПродовжити перевірку через ШІ?`;
+                const proceed = await confirmDuplicateReceipt(prompt);
+                if (!proceed) {
+                    receiptDuplicateDeclinedPath = currentPath;
+                    setReceiptAiStatus('Перевірку ШІ скасовано. Токени не витрачено; витрату не додано.', 'warning');
+                    return;
+                }
+                receiptDuplicateBypassPath = currentPath;
+            }
+        }
+
+        setReceiptAiStatus('Перевірка документа через ШІ…');
         const response = await fetch('/api/receipts/recognize', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1403,6 +1443,8 @@ function openForm(expenseId = '', date = '', amount = '', name = '', category = 
     recognizedDocumentType = urlParams.get('document_type') || 'невідомий документ';
     uploadedReceiptFile = null;
     recognitionCategoryId = '';
+    receiptDuplicateDeclinedPath = '';
+    receiptDuplicateBypassPath = '';
     setReceiptAiStatus(recognizedNonReceipt
         ? `Документ «${recognizedDocumentType}» потребує перевірки адміністратором. Перевірте або виправте дані перед передачею.`
         : '', recognizedNonReceipt ? 'warning' : 'info');
@@ -1464,6 +1506,8 @@ function removeAttachedReceipt() {
     document.getElementById('f-file').style.display = 'block';
     document.getElementById('f-file').value = '';
     uploadedReceiptFile = null;
+    receiptDuplicateDeclinedPath = '';
+    receiptDuplicateBypassPath = '';
     receiptRecognitionComplete = false;
     recognizedNonReceipt = false;
     setReceiptAiStatus('');
@@ -1651,7 +1695,8 @@ async function saveExpense() {
             expense_name: document.getElementById('f-name').value,
             category: selectedCategoryId,
             file_path: currentPath,
-            msg_id: msgId ? parseInt(msgId) : null
+            msg_id: msgId ? parseInt(msgId) : null,
+            allow_duplicate: receiptDuplicateBypassPath === currentPath
         };
 
         if (recognizedNonReceipt || urlParams.get('invalid_receipt') === '1') {
@@ -1685,9 +1730,7 @@ async function saveExpense() {
                 const prompt = `${duplicate.message || 'Схоже, цей чек уже додано'}:\n` +
                     `${existing.date || ''} · ${Number(existing.amount || 0).toFixed(2)} грн · ` +
                     `${existing.expense_name || ''}\n\nВсе одно додати витрату?`;
-                const confirmed = tg && typeof tg.showConfirm === 'function'
-                    ? await new Promise(resolve => tg.showConfirm(prompt, resolve))
-                    : window.confirm(prompt);
+                const confirmed = await confirmDuplicateReceipt(prompt);
                 if (!confirmed) return;
                 payload.allow_duplicate = true;
                 requestOptions.body = JSON.stringify(payload);

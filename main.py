@@ -60,6 +60,9 @@ async def main():
 
     # 0.4 Хеші чеків для пошуку дублів — обов'язкова схема для запису витрат.
     await database.ensure_duplicate_expense_schema()
+    migrated_hashes = await database.backfill_existing_receipt_hashes()
+    if migrated_hashes:
+        logging.info("Ліниво заповнено SHA-256 для %s старих чеків", migrated_hashes)
 
     # 1. Завантажуємо користувачів із MySQL
 
