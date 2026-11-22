@@ -190,19 +190,68 @@ function getBudgetCenterId() {
     return currentUserCenterId ? parseInt(currentUserCenterId) : null;
 }
 
+function getExpenseReportCenterId() {
+    if (currentUserRole === 'admin') return getSelectedCenterId();
+    return currentUserCenterId ? parseInt(currentUserCenterId) : null;
+}
+
+async function downloadExpenseReport() {
+    const centerId = getExpenseReportCenterId();
+    const month = document.getElementById('main-month-filter')?.value;
+    const button = document.getElementById('btn-expense-report');
+    if (!centerId) {
+        alert('Оберіть конкретний Центр Надії для формування звіту.');
+        return;
+    }
+    if (!month) {
+        alert('Оберіть місяць для формування звіту.');
+        return;
+    }
+
+    if (button) button.disabled = true;
+    try {
+        const response = await fetch(
+            `/api/reports/pdf?center_id=${encodeURIComponent(centerId)}&month=${encodeURIComponent(month)}`
+        );
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || `Помилка формування PDF (${response.status})`);
+        }
+        const blob = await response.blob();
+        if (blob.type && blob.type !== 'application/pdf') {
+            throw new Error('Сервер повернув файл невідомого формату.');
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `expense-report-${month}-center-${centerId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+        alert(error.message || 'Не вдалося завантажити PDF-звіт.');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 // Кнопки дій: додавати витрати можна лише у свій ЦН
 function updateActionButtons() {
     const btnAdd = document.getElementById('btn-add-expense');
     const btnBudget = document.getElementById('btn-my-budget');
     const btnCash = document.getElementById('btn-my-cash');
+    const btnExpenseReport = document.getElementById('btn-expense-report');
     const hasOwnCenter = !!currentUserCenterId;
     const selected = getSelectedCenterId();
     const viewingOwnCenter = !selected || String(selected) === String(currentUserCenterId);
 
     if (btnAdd) btnAdd.style.display = (hasOwnCenter && viewingOwnCenter) ? 'inline-block' : 'none';
     if (btnBudget) btnBudget.style.display = hasOwnCenter ? 'inline-block' : 'none';
-    // Кошти: свій ЦН, а адміну — ще й обраний у фільтрі (read-only перегляд)
+    // Кошти та звіт: свій ЦН, а адміну — ще й обраний у фільтрі.
     if (btnCash) btnCash.style.display = (hasOwnCenter || !!selected) ? 'inline-block' : 'none';
+    if (btnExpenseReport) btnExpenseReport.style.display = getExpenseReportCenterId() ? 'inline-block' : 'none';
 }
 
 function checkUserRole() {

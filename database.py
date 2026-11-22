@@ -934,6 +934,51 @@ async def get_category_spent(center_id: int, category_id: str, month: str) -> fl
     return _r2(row['spent'])
 
 
+async def get_monthly_expense_report(center_id: int, month: str) -> dict | None:
+    """Read-only report data for one center and one YYYY-MM period."""
+    if not center_id:
+        raise ValueError("Не вказано ЦН")
+    if not is_valid_month(month):
+        raise ValueError("Місяць має бути у форматі YYYY-MM")
+
+    date_from, date_to = _month_bounds(month)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                "SELECT id, name, city FROM centers WHERE id = %s",
+                (center_id,),
+            )
+            center = await cur.fetchone()
+            if not center:
+                return None
+
+            await cur.execute(
+                """SELECT e.date, e.expense_name, e.amount,
+                          COALESCE(c.name, 'Інше') AS category_name
+                   FROM expenses e
+                   LEFT JOIN categories c ON c.id = e.category_id
+                   WHERE e.center_id = %s AND e.date >= %s AND e.date < %s
+                   ORDER BY e.date ASC, e.created_at ASC, e.id ASC""",
+                (center_id, date_from, date_to),
+            )
+            rows = await cur.fetchall() or []
+
+    expenses = [{
+        'date': str(row['date']),
+        'expense_name': str(row.get('expense_name') or ''),
+        'category_name': str(row.get('category_name') or 'Інше'),
+        'amount': _r2(row.get('amount')),
+    } for row in rows]
+    return {
+        'center_id': int(center['id']),
+        'center_name': str(center['name']),
+        'city': str(center.get('city') or ''),
+        'month': month,
+        'expenses': expenses,
+    }
+
+
 async def get_center_budgets(center_id: int, month: str) -> dict:
     pool = await get_pool()
     budgets_map = {}

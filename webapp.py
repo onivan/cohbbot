@@ -1184,6 +1184,35 @@ def _require_month(month: Optional[str]) -> str:
     return month
 
 
+@app.get("/api/reports/pdf")
+async def monthly_expense_report_pdf(center_id: Optional[int] = None,
+                                    month: Optional[str] = None,
+                                    current_user: int = Depends(get_current_user)):
+    """PDF-звіт витрат ЦН за місяць; користувач — лише свій ЦН, адмін — будь-який."""
+    report_center_id = await _cash_center_for(current_user, center_id)
+    report_month = _require_month(month)
+    report = await database.get_monthly_expense_report(report_center_id, report_month)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Центр Надії не знайдено")
+
+    try:
+        from report_service import build_monthly_expense_pdf
+        pdf_content = build_monthly_expense_pdf(report)
+    except (ImportError, RuntimeError):
+        logging.exception("Не вдалося підготувати PDF-звіт")
+        raise HTTPException(status_code=503, detail="Генератор PDF не налаштований на сервері")
+
+    filename = f"expense-report-{report_month}-center-{report_center_id}.pdf"
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 def _csv_money(value) -> str:
     """Число для Excel: десяткова кома, без роздільника тисяч."""
     if value is None or value == '':

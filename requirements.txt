@@ -14,6 +14,7 @@ jinja2
 pydantic
 python-multipart
 itsdangerous
+reportlab>=4.2,<5
 
 # Google Cloud, Sheets & Billing Integration
 gspread

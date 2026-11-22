@@ -8,7 +8,7 @@ STAGING := /home/onivan/cohbbot-dev
 SSH     := ssh -o BatchMode=yes $(VPS)
 
 .DEFAULT_GOAL := help
-.PHONY: help check-vps test test-local deploy deploy-prod restart restart-prod restart-all logs status shell
+.PHONY: help check-vps test test-local test-browser deploy deploy-prod restart restart-prod restart-all logs status shell
 
 help:  ## список команд
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -17,14 +17,19 @@ check-vps:  ## (службова) перевірка, що адреса VPS за
 	@test -n "$(strip $(VPS))" || { \
 		echo "!! не задано COHB_VPS: cp .vps.env.example .vps.env && chmod 600 .vps.env" >&2; exit 1; }
 
-test: check-vps  ## тести на VPS (там БД, venv і запущений сервіс)
-	$(SSH) 'cd $(STAGING) && venv/bin/python -m unittest test_telegram_auth.py test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
+test: check-vps  ## backend-тести на VPS і headless browser acceptance проти staging
+	$(SSH) 'cd $(STAGING) && venv/bin/python -m unittest test_telegram_auth.py test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_report_pdf.py && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
+	$(MAKE) --no-print-directory test-browser
 
 test-local:  ## тести локально (потрібен .env і доступ до БД)
 	python3 -m unittest test_telegram_auth.py
-	venv/bin/python -m unittest test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py
+	venv/bin/python -m unittest test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_report_pdf.py
 	venv/bin/python test_cash.py
 	venv/bin/python test_centers_own.py
+
+test-browser:  ## headless E1 browser acceptance проти staging; конфіг у browser_tests/e1-staging-config
+	@test -f browser_tests/e1-staging-config || { echo "Скопіюйте browser_tests/e1-staging-config.example за інструкцією README.md" >&2; exit 1; }
+	@set -a; . ./browser_tests/e1-staging-config; set +a; cd browser_tests && npm test
 
 deploy:  ## задеплоїти поточну гілку (push → хук на VPS)
 	./deploy.sh
