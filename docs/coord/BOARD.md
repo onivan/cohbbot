@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: TODO section ordering (K after J)
-- branch: dev
-- since: 2026-11-22T13:03:08Z
-- note: Move K section after J in TODO; commit and release lock.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -248,3 +248,8 @@
 - Додатково перевірено: `expensebot-dev.service` active, VPS HEAD `5097dcf`, HTTP smoke на `127.0.0.1:8001/` — 200; startup backfill записав хеші для 28 legacy-чеків. Локальний unittest не стартував через відсутній `aiomysql`; `compileall` і `git diff --check` пройшли.
 - C1 та етап 7 закриті у `TODO.md` і `docs/PRE_RELEASE_PLAN.md`. Документаційний коміт і звільнення лока виконуються в цій передачі; staging-деплой документаційних змін не потрібен.
 - Наступний крок: етап 8 / K1. До реалізації узгодити дедлайн подання, чи потрібні нагадування та чи є K1 обов'язковим для першого MVP-запуску. Лок звільнено.
+
+### 2026-11-22T13:03Z · TODO · порядок розділів · ws-ubuntu → передача
+- Переміщено розділ K з-перед H до кінця тематичних розділів після J, щоб порядок був A–G, H, J, K; зміст і статуси задач не змінювалися.
+- Перевірка: `git diff --check`; лише документаційна зміна, staging-деплой і runtime-тести не потрібні.
+- Лок звільнено.
