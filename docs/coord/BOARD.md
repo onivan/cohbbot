@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: MVP user/admin instructions scope
-- branch: dev
-- since: 2026-11-22T13:19:15Z
-- note: Add user-CN and admin app instructions to MVP plan; release lock when pushed.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -259,3 +259,9 @@
 - K1 та всі інші незавершені задачі позначені як відкладені до наступного релізу; завершені функції лишаються в MVP.
 - Оновлено TODO і `docs/PRE_RELEASE_PLAN.md`. Перевірка документації: `git diff --check`; staging-деплой не потрібен.
 - Наступний крок: реалізувати E1, потім A5; після staging acceptance обох — узгодити й виконати production-деплой за TODO §I. Лок звільнено.
+
+### 2026-11-22T13:19Z · MVP scope · інструкції користувача та адміністратора · ws-ubuntu → передача
+- До MVP додано оновлення `instruction.md` для користувача ЦН і окрему інструкцію адміністратора з посиланням у адмін-інтерфейсі; інструкції мають відповідати фінальному UI E1/A5.
+- У передрелізному плані зафіксовано порядок E1 → A5 → інструкції, а headless Playwright acceptance обмежено сценаріями E1/A5; production-реліз після staging acceptance і звірки інструкцій.
+- Перевірка: `git diff --check`; лише документація і планування, staging-деплой не потрібен.
+- Наступний крок: E1 → A5 → інструкції; потім production-реліз за TODO §I. Лок звільнено.
