@@ -14,7 +14,7 @@ import logging
 import math
 from datetime import datetime
 from urllib.parse import unquote, urlsplit
-from itsdangerous import URLSafeSerializer, BadSignature
+from itsdangerous import URLSafeSerializer, URLSafeTimedSerializer, BadSignature
 from PIL import Image
 from config import WEBAPP_URL, SECRET_KEY, TELEGRAM_TOKEN
 from telegram_auth import telegram_webapp_user_id
@@ -22,6 +22,7 @@ from telegram_auth import telegram_webapp_user_id
 app = FastAPI(title="Expense Tracker WebApp")
 templates = Jinja2Templates(directory="templates")
 serializer = URLSafeSerializer(SECRET_KEY)
+report_download_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="expense-report-download")
 
 
 def static_version(filename: str) -> str:
@@ -1182,6 +1183,61 @@ def _require_month(month: Optional[str]) -> str:
         raise HTTPException(status_code=400, detail="Вкажіть місяць у форматі YYYY-MM")
     _check_month(month)
     return month
+
+
+@app.get("/api/reports/pdf/download-link")
+async def monthly_expense_report_download_link(center_id: Optional[int] = None,
+                                               month: Optional[str] = None,
+                                               current_user: int = Depends(get_current_user)):
+    """Short-lived, scoped URL for Telegram's native file-download prompt."""
+    report_center_id = await _cash_center_for(current_user, center_id)
+    report_month = _require_month(month)
+    token = report_download_serializer.dumps({
+        "user_id": int(current_user),
+        "center_id": report_center_id,
+        "month": report_month,
+    })
+    filename = f"expense-report-{report_month}-center-{report_center_id}.pdf"
+    return {
+        "url": f"{WEBAPP_URL.rstrip('/')}/api/reports/pdf/file?token={token}",
+        "filename": filename,
+    }
+
+
+@app.get("/api/reports/pdf/file")
+async def monthly_expense_report_file(token: str):
+    """Serve a report using a five-minute, signed download capability."""
+    try:
+        claims = report_download_serializer.loads(token, max_age=300)
+        user_id = int(claims["user_id"])
+        center_id = int(claims["center_id"])
+        report_month = str(claims["month"])
+    except (BadSignature, KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="Посилання на завантаження недійсне або застаріло")
+
+    await _cash_center_for(user_id, center_id)
+    report_month = _require_month(report_month)
+    report = await database.get_monthly_expense_report(center_id, report_month)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Центр Надії не знайдено")
+
+    try:
+        from report_service import build_monthly_expense_pdf
+        pdf_content = build_monthly_expense_pdf(report)
+    except (ImportError, RuntimeError):
+        logging.exception("Не вдалося підготувати PDF-звіт")
+        raise HTTPException(status_code=503, detail="Генератор PDF не налаштований на сервері")
+
+    filename = f"expense-report-{report_month}-center-{center_id}.pdf"
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @app.get("/api/reports/pdf")

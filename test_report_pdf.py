@@ -5,6 +5,7 @@
 import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 import aiomysql
 from fastapi import HTTPException
@@ -136,6 +137,42 @@ class MonthlyExpensePdfTests(unittest.TestCase):
 
 
 class MonthlyExpenseReportEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_telegram_download_link_is_signed_and_center_scoped(self):
+        with patch.object(webapp, '_cash_center_for', AsyncMock(return_value=8)) as scope:
+            result = await webapp.monthly_expense_report_download_link(8, '2026-11', current_user=12)
+
+        scope.assert_awaited_once_with(12, 8)
+        parsed_url = urlsplit(result['url'])
+        self.assertEqual(parsed_url.path, '/api/reports/pdf/file')
+        self.assertEqual(result['filename'], 'expense-report-2026-11-center-8.pdf')
+        token = parse_qs(parsed_url.query)['token'][0]
+        claims = webapp.report_download_serializer.loads(token, max_age=300)
+        self.assertEqual(claims, {'user_id': 12, 'center_id': 8, 'month': '2026-11'})
+
+    async def test_signed_download_returns_pdf_and_rechecks_access(self):
+        report_data = {
+            'center_id': 8, 'center_name': 'ЦН Львів', 'month': '2026-11', 'expenses': [],
+        }
+        token = webapp.report_download_serializer.dumps({
+            'user_id': 12, 'center_id': 8, 'month': '2026-11',
+        })
+        with patch.object(webapp, '_cash_center_for', AsyncMock(return_value=8)) as scope, \
+             patch.object(database, 'get_monthly_expense_report', AsyncMock(return_value=report_data)), \
+             patch.object(report_service, 'build_monthly_expense_pdf', return_value=b'%PDF-test'):
+            response = await webapp.monthly_expense_report_file(token)
+
+        scope.assert_awaited_once_with(12, 8)
+        self.assertEqual(response.media_type, 'application/pdf')
+        self.assertEqual(response.body, b'%PDF-test')
+        self.assertIn('attachment;', response.headers['content-disposition'])
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        self.assertEqual(response.headers['referrer-policy'], 'no-referrer')
+
+    async def test_signed_download_rejects_invalid_token(self):
+        with self.assertRaises(HTTPException) as error:
+            await webapp.monthly_expense_report_file('tampered')
+        self.assertEqual(error.exception.status_code, 403)
+
     async def test_pdf_response_and_access_scope(self):
         report_data = {
             'center_id': 8, 'center_name': 'ЦН Львів', 'month': '2026-11', 'expenses': [],

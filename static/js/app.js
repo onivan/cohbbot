@@ -210,6 +210,19 @@ async function downloadExpenseReport() {
 
     if (button) button.disabled = true;
     try {
+        if (tg && typeof tg.downloadFile === 'function'
+                && (typeof tg.isVersionAtLeast !== 'function' || tg.isVersionAtLeast('8.0'))) {
+            const linkResponse = await fetch(
+                `/api/reports/pdf/download-link?center_id=${encodeURIComponent(centerId)}&month=${encodeURIComponent(month)}`
+            );
+            const payload = await linkResponse.json().catch(() => ({}));
+            if (!linkResponse.ok) {
+                throw new Error(payload.detail || `Помилка формування PDF (${linkResponse.status})`);
+            }
+            tg.downloadFile({ url: payload.url, file_name: payload.filename }, () => {});
+            return;
+        }
+
         const response = await fetch(
             `/api/reports/pdf?center_id=${encodeURIComponent(centerId)}&month=${encodeURIComponent(month)}`
         );
