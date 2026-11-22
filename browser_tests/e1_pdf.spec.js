@@ -6,21 +6,24 @@ const foreignCenterId = process.env.E1_FOREIGN_CENTER_ID;
 const adminId = process.env.E1_ADMIN_ID;
 const month = process.env.E1_MONTH;
 
-async function openAs(page, id) {
+async function openAs(page, id, { nativeDownload = false } = {}) {
     await page.route('https://telegram.org/**', route => route.abort());
     await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
-    await page.addInitScript(() => {
+    await page.addInitScript(({ nativeDownload }) => {
         window.eruda = { init() {} };
-        window.Telegram = {
-            WebApp: {
-                ready() {},
-                expand() {},
-                initData: '',
-                initDataUnsafe: {},
-                colorScheme: 'light',
-            },
+        window.__nativeDownloadRequest = null;
+        const webApp = {
+            ready() {},
+            expand() {},
+            initData: '',
+            initDataUnsafe: {},
+            colorScheme: 'light',
         };
-    });
+        if (nativeDownload) {
+            webApp.downloadFile = options => { window.__nativeDownloadRequest = options; };
+        }
+        window.Telegram = { WebApp: webApp };
+    }, { nativeDownload });
     await page.goto(`/?user_id=${encodeURIComponent(id)}`);
     await expect(page.locator('#main-month-filter')).toBeVisible();
     if (String(id) === String(adminId)) {
@@ -54,6 +57,26 @@ test('user can download a PDF for their own center and selected month', async ({
     expect(download.suggestedFilename()).toContain(`expense-report-${month}`);
     const body = await response.body();
     expect(body.subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+test('Telegram mobile uses its native file-download flow for the report', async ({ page }) => {
+    await openAs(page, userId, { nativeDownload: true });
+    await page.locator('#main-month-filter').fill(month);
+
+    const linkResponsePromise = page.waitForResponse(response =>
+        response.url().includes('/api/reports/pdf/download-link')
+    );
+    await page.locator('#btn-expense-report').click();
+    const linkResponse = await linkResponsePromise;
+    expect(linkResponse.status()).toBe(200);
+
+    await expect.poll(() => page.evaluate(() => window.__nativeDownloadRequest)).not.toBeNull();
+    const downloadRequest = await page.evaluate(() => window.__nativeDownloadRequest);
+    expect(downloadRequest.file_name).toContain(`expense-report-${month}`);
+    const response = await page.request.get(downloadRequest.url);
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toContain('application/pdf');
+    expect((await response.body()).subarray(0, 5).toString()).toBe('%PDF-');
 });
 
 test('user cannot download a report for another center', async ({ page }) => {
