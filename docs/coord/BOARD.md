@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-ubuntu
+- task: MVP user/admin instructions scope
+- branch: dev
+- since: 2026-11-22T13:19:15Z
+- note: Add user-CN and admin app instructions to MVP plan; release lock when pushed.
 
 
 
