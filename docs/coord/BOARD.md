@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: MVP scope update (E1 + A5; defer others)
-- branch: dev
-- since: 2026-11-22T13:07:56Z
-- note: Update TODO and pre-release plan for agreed MVP scope; then release lock.
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: —
 
 
 
@@ -253,3 +253,9 @@
 - Переміщено розділ K з-перед H до кінця тематичних розділів після J, щоб порядок був A–G, H, J, K; зміст і статуси задач не змінювалися.
 - Перевірка: `git diff --check`; лише документаційна зміна, staging-деплой і runtime-тести не потрібні.
 - Лок звільнено.
+
+### 2026-11-22T13:07Z · MVP scope · ws-ubuntu → передача
+- За рішенням користувача для MVP лишено лише E1 (PDF-звіт) та A5 (вартість/якість AI); після staging acceptance обох задач планується production-реліз.
+- K1 та всі інші незавершені задачі позначені як відкладені до наступного релізу; завершені функції лишаються в MVP.
+- Оновлено TODO і `docs/PRE_RELEASE_PLAN.md`. Перевірка документації: `git diff --check`; staging-деплой не потрібен.
+- Наступний крок: реалізувати E1, потім A5; після staging acceptance обох — узгодити й виконати production-деплой за TODO §I. Лок звільнено.
