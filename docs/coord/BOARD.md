@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: E1 (PDF report)
-- branch: feat/e1-pdf-report
-- since: 2026-11-22T13:31:27Z
-- note: Implement report endpoint/UI/access checks/tests; keep dev deployable.
+- state: FREE
+- owner: -
+- task: -
+- branch: dev
+- since: -
+- note: E1 integrated in dev; staging deployment, reportlab install, and E1 acceptance are pending.
 
 
 
@@ -265,3 +265,10 @@
 - У передрелізному плані зафіксовано порядок E1 → A5 → інструкції, а headless Playwright acceptance обмежено сценаріями E1/A5; production-реліз після staging acceptance і звірки інструкцій.
 - Перевірка: `git diff --check`; лише документація і планування, staging-деплой не потрібен.
 - Наступний крок: E1 → A5 → інструкції; потім production-реліз за TODO §I. Лок звільнено.
+
+### 2026-11-22T19:11Z · E1 · інтеграція у dev · ws-ubuntu → передача на staging
+- Реалізацію закомічено у `feat/e1-pdf-report` (`641ab6c`) та злито в `dev`; merge-коміт `7230991` запушено в `origin/dev`. Робоче дерево чисте.
+- Додано read-only endpoint `/api/reports/pdf`, вибірку лише для одного ЦН і місяця, PDF із українськими шрифтами/підсумками та кнопку завантаження. У `make test` включено 12 E1 backend tests (11 ізольованих і 1 read-only SQL integration) та 4 Playwright acceptance-сценарії проти staging.
+- Локально: `py_compile`, `node --check`, `git diff --check` пройшли; 11 ізольованих backend-тестів пройшли; PDF smoke підтвердив A4, український текст і загальну суму. Playwright лише завантажено/перелічено (`--list`), реальні staging-сценарії не виконувалися; інтеграційний SQL-тест також очікує staging DB.
+- Ручні кроки користувача: задеплоїти `dev` через `./deploy.sh`, перевірити `make status` і VPS HEAD=`7230991`; установити залежності у staging venv (`/home/onivan/cohbbot-dev/venv/bin/pip install -r /home/onivan/cohbbot-dev/requirements.txt`). Скопіювати `browser_tests/e1-staging-config.example` у `browser_tests/e1-staging-config`, заповнити тестовими активними user/admin IDs та іншим ЦН; у `browser_tests/` виконати `npm ci` і `npx playwright install chromium`; після цього запустити `make test`.
+- E1 лишається відкритою до успішного `make test` і підтвердження staging acceptance; браузерні дії read-only. Після E1 перейти до A5. Лок звільнено.
