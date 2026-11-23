@@ -59,6 +59,17 @@ class DevTimeReportTests(unittest.TestCase):
             "Add A.; Update B.; Explain C.",
         )
 
+    def test_long_session_can_exceed_eight_hours(self):
+        events = [
+            dev_time_report.CommitEvent(
+                datetime(2026, 1, 6, hour, tzinfo=timezone.utc),
+                "feat: continue development",
+            )
+            for hour in (8, 10, 12, 14, 16, 18)
+        ]
+        rows = dev_time_report.build_daily_rows(events)
+        self.assertEqual(rows[0]["hours"], 11)
+
     def test_csv_has_requested_columns_and_semicolon_joined_tasks(self):
         output = io.StringIO()
         dev_time_report.write_csv(

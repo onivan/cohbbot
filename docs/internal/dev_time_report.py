@@ -21,7 +21,6 @@ from typing import TextIO
 DEFAULT_IDLE_GAP_HOURS = 3.0
 DEFAULT_PADDING_HOURS = 0.5
 DEFAULT_MIN_SESSION_HOURS = 1.0
-DEFAULT_MAX_SESSION_HOURS = 8.0
 MAX_TASK_WORDS = 12
 
 COMMIT_PREFIX = re.compile(
@@ -175,10 +174,9 @@ def estimate_session_hours(
     session: list[CommitEvent],
     padding_hours: float,
     minimum_hours: float,
-    maximum_hours: float,
 ) -> float:
     span_hours = (session[-1].timestamp - session[0].timestamp).total_seconds() / 3600
-    return min(maximum_hours, max(minimum_hours, span_hours + padding_hours))
+    return max(minimum_hours, span_hours + padding_hours)
 
 
 def round_hours(hours: float) -> int:
@@ -191,7 +189,6 @@ def build_daily_rows(
     idle_gap_hours: float = DEFAULT_IDLE_GAP_HOURS,
     padding_hours: float = DEFAULT_PADDING_HOURS,
     minimum_hours: float = DEFAULT_MIN_SESSION_HOURS,
-    maximum_hours: float = DEFAULT_MAX_SESSION_HOURS,
 ) -> list[dict[str, object]]:
     events_by_day: dict[str, list[CommitEvent]] = defaultdict(list)
     for event in events:
@@ -203,7 +200,7 @@ def build_daily_rows(
         day_events = events_by_day[date]
         sessions = split_sessions(day_events, idle_gap_hours)
         total_hours = sum(
-            estimate_session_hours(session, padding_hours, minimum_hours, maximum_hours)
+            estimate_session_hours(session, padding_hours, minimum_hours)
             for session in sessions
         )
         tasks = []
@@ -248,12 +245,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MIN_SESSION_HOURS,
         help=f"Minimum estimate per active session (default: {DEFAULT_MIN_SESSION_HOURS:g}).",
     )
-    parser.add_argument(
-        "--maximum-session-hours",
-        type=float,
-        default=DEFAULT_MAX_SESSION_HOURS,
-        help=f"Maximum estimate per session (default: {DEFAULT_MAX_SESSION_HOURS:g}).",
-    )
+
     parser.add_argument(
         "--include-coordination",
         action="store_true",
@@ -271,8 +263,6 @@ def main() -> int:
         or args.padding_hours < 0
         or not math.isfinite(args.minimum_session_hours)
         or args.minimum_session_hours <= 0
-        or not math.isfinite(args.maximum_session_hours)
-        or args.maximum_session_hours < args.minimum_session_hours
     ):
         print("Invalid estimate settings; check the hours options.", file=sys.stderr)
         return 2
@@ -284,7 +274,6 @@ def main() -> int:
         idle_gap_hours=args.idle_gap_hours,
         padding_hours=args.padding_hours,
         minimum_hours=args.minimum_session_hours,
-        maximum_hours=args.maximum_session_hours,
     )
 
     if args.output == "-":

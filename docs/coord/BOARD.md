@@ -11,7 +11,7 @@
 - task: —
 - branch: —
 - since: —
-- note: Internal tool commits are excluded from the Git estimate; CSV regeneration is safe
+- note: Session estimate now has no upper cap; CSV refresh is pending until spreadsheet lock clears
 
 
 
@@ -22,6 +22,17 @@
 ---
 
 ## Журнал передач
+
+### 2026-11-23T20:24Z · Internal report session cap · захоплення лока · ws-ubuntu
+- Користувач уточнив, що одна денна сесія може перевищувати 8 годин; попросив прибрати це обмеження.
+- Залишити інші правила оцінки без змін, додати тест >8 годин і оновити README.
+- CSV зараз відкритий/залочений (`.~lock.development_time_report.csv#`); не перезаписувати його до зняття lock.
+
+### 2026-11-23T20:26Z · Internal report session cap · завершено · ws-ubuntu → передача
+- Видалено 8h maximum із session estimator, CLI й README; у тестах перевіряється сесія на 10h + padding, результат 11h після округлення.
+- `python3 -m unittest docs.internal.test_dev_time_report` пройшов (8/8); py_compile і `git diff --check` пройшли.
+- CSV preview через `--output -` показав оновлену оцінку, але tracked CSV не перезаписувався, бо присутній LibreOffice lock `.~lock.development_time_report.csv#`.
+- Наступний крок: після закриття таблиці виконати `python3 docs/internal/dev_time_report.py`, щоб оновити tracked CSV; зміни не стосуються runtime.
 
 ### 2026-11-23T20:03Z · Internal report exclusion follow-up · захоплення лока · ws-ubuntu
 - Перевіряю, що наступний запуск CSV-генератора не врахує власний внутрішній коміт, який також оновив BOARD.
