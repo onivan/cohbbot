@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: Етап 10 — інструкції користувача й адміністратора
-- branch: feat/instructions-user-admin
-- since: 2026-11-23T14:39:00Z
-- note: Takeover за прямим дозволом користувача попри попередній BUSY; оновити обидві інструкції та доступ з інтерфейсів
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: Етап 10 передано користувачу на staging acceptance; dev @ e2015bc
 
 
 
@@ -304,3 +304,10 @@
 - Перевірка документації: `git diff --check` пройшла. `make test` і `make status` не запускались; ручного A5 acceptance немає/не потрібен для цього релізу.
 - Наступний крок: продовжити підготовку MVP з інструкціями користувача й адміністратора; A5 повернути в план наступного релізу.
 - Лок звільнено.
+
+### 2026-11-23T15:04Z · етап 10 · інтеграція інструкцій у dev · ws-ubuntu → передача на staging
+- Feature-коміт `3a6b9f4` злито в `dev`; merge-коміт `e2015bc` запушено в `origin/dev`.
+- Оновлено `instruction.md`, додано захищену інструкцію адміністратора `/admin/instructions` і посилання в адмін-панелі; у передрелізному плані зафіксовано staging acceptance як наступний крок.
+- Локальні перевірки: `py_compile webapp.py`, `test_telegram_auth.py` (6/6), HTML parsing/static source checks і `git diff --check` пройшли. Request-level/runtime-перевірку не виконано: у локальному середовищі немає FastAPI.
+- Деплой і staging acceptance не виконувались; за регламентом staging-деплой виконує користувач. Перед production потрібно задеплоїти `dev`, перевірити `make status`/SHA, запустити `make test` і вручну перевірити доступ адміністратора та редирект звичайного користувача.
+- Наступний крок користувача: staging acceptance етапу 10; після успіху підготувати production-реліз за `TODO.md` §I. Лок звільнено.
