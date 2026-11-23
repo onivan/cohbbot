@@ -3,6 +3,7 @@ import asyncio
 import logging
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from instruction_rendering import instruction_plain_text, split_telegram_messages
 
 router = Router()
 
@@ -26,5 +27,7 @@ async def cmd_instruction(message: types.Message):
     Спрацьовує на команди /help, /instruction, /guide
     та на натискання кнопки «📖 Інструкція».
     """
-    instruction_text = await asyncio.to_thread(load_instruction_md, "instruction.md")
-    await message.answer(instruction_text, parse_mode="Markdown")
+    instruction_markdown = await asyncio.to_thread(load_instruction_md, "instruction.md")
+    instruction_text = instruction_plain_text(instruction_markdown)
+    for part in split_telegram_messages(instruction_text):
+        await message.answer(part)

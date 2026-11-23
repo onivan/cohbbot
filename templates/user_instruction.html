@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Інструкція користувача</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .user-instruction-page { max-width: 760px; margin: 0 auto; padding: 16px; line-height: 1.55; }
+        .user-instruction-page h1, .user-instruction-page h2 { margin-top: 1.3em; }
+        .user-instruction-page li { margin: 0.45em 0; }
+        .user-instruction-page .instruction-nav { margin: 12px 0 20px; }
+        .user-instruction-page .instruction-nav a { color: #16803c; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <main class="user-instruction-page">
+        <nav class="instruction-nav"><a href="/">← До застосунку</a></nav>
+        {{ instruction_html|safe }}
+    </main>
+</body>
+</html>

@@ -18,6 +18,7 @@ from itsdangerous import URLSafeSerializer, URLSafeTimedSerializer, BadSignature
 from PIL import Image
 from config import WEBAPP_URL, SECRET_KEY, TELEGRAM_TOKEN
 from telegram_auth import telegram_webapp_user_id
+from instruction_rendering import instruction_markdown_to_html
 
 app = FastAPI(title="Expense Tracker WebApp")
 templates = Jinja2Templates(directory="templates")
@@ -179,6 +180,25 @@ class AIModelData(BaseModel):
     input_price_per_million: Optional[float] = None
     output_price_per_million: Optional[float] = None
 
+
+
+@app.get("/instructions")
+async def user_instructions_page(request: Request):
+    """Public user guide, also available before signing into the Web App."""
+    try:
+        with open("instruction.md", "r", encoding="utf-8") as instruction_file:
+            markdown_text = await asyncio.to_thread(instruction_file.read)
+    except OSError:
+        markdown_text = "Інструкція тимчасово недоступна. Зверніться до адміністратора."
+
+    return templates.TemplateResponse(
+        request=request,
+        name="user_instruction.html",
+        context={
+            "request": request,
+            "instruction_html": instruction_markdown_to_html(markdown_text),
+        },
+    )
 
 
 @app.get("/login")
