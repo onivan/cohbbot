@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: MVP production release prep
-- branch: dev
-- since: 2026-11-23T19:03:00Z
-- note: Етапи B5 і 10 прийняті; підготовити fast-forward main та production handoff без деплою
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: Release candidate `67316de` опубліковано в origin/main; production VPS не деплоївся
 
 
 
@@ -27,6 +27,14 @@
 - Користувач підтвердив успішний `make test` і ручне приймання етапу 10 (інструкції); B5 прийнято раніше.
 - Захоплено роботу з підготовки production release candidate. Production-деплой і рестарт залишаються за користувачем.
 - Наступний крок: закрити етап 10 у TODO/плані, актуалізувати refs у production-клоні, fast-forward `main` до прийнятого `dev`, перевірити diff і запушити `origin/main` без `deploy-main`.
+
+### 2026-11-23T19:06Z · MVP production candidate · ws-ubuntu → користувач
+- За підтвердженням користувача `make test` і ручна перевірка етапу 10 успішні; числовий вивід та staging SHA окремо не надані. B5 та етап 10 позначені прийнятими у TODO/плані.
+- Release candidate `67316de` (runtime + acceptance/release docs) запушено в `origin/main`; production-клон `main` fast-forward-нуто від `f95dbd1`. На момент promotion `main`, `origin/main` і `origin/dev` відповідали `67316de`.
+- Цей handoff-запис додається окремим coordination-only комітом у `dev`; він не змінює production release candidate і не вимагає staging-деплою.
+- `make status` раніше показав VPS доступний, staging/prod active; remote production worktree не перевірявся на локальні правки. Production `.vps.env` наявний, mode 600.
+- Production-деплой не виконувався: `deploy-main` і production VPS не змінювалися. У release diff додається `reportlab>=4.2,<5`; перед deploy користувач має вручну встановити requirements у prod venv і перевірити remote production worktree за §I. `git diff --check` по всій історії main→dev знайшов наявні trailing/blank-line whitespace у змінених історичних файлах; runtime-правок для цього не робили.
+- Наступний крок користувача: у production-клоні перевірити staging SHA/test results, заздалегідь перевірити чистоту `/home/onivan/cohbbot` і погодити restart window; встановити prod requirements, потім виконати `./deploy.sh` та production smoke-перевірки.
 
 ### 2026-11-23T15:49Z · MVP баг-репорти · захоплення лока · ws-ubuntu
 - Користувач попросив реалізувати мінімальний баг-репорт до поточного релізу.
