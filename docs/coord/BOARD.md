@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: Етап 10 follow-up — доступність інструкції користувача
-- branch: dev
-- since: 2026-11-23T15:17:00Z
-- note: Виправити збій /help і Telegram-кнопки; перевірити довжину/формат повідомлення
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: Фікс інструкції запушено в dev @ 061c4a8; очікує staging-деплою й acceptance
 
 
 
@@ -27,6 +27,12 @@
 - Користувач повідомив, що `/help` і кнопка «📖 Інструкція» не відповідають.
 - Локальний аналіз виявив: `instruction.md` має 4257 символів — більше за межу Telegram 4096 символів на повідомлення; поточний обробник відправляє його одним повідомленням.
 - Наступний крок: розділити інструкцію на допустимі Telegram-повідомлення, зберегти коректну Markdown-розмітку та додати тести.
+
+### 2026-11-23T15:37Z · етап 10 follow-up · фікс інструкції · ws-ubuntu → staging
+- Коміт `061c4a8` (`fix(instructions): deliver guide in Telegram-sized messages`) запушено в `origin/dev`.
+- `/help` та кнопка «📖 Інструкція» тепер отримують plain-text частини до 3800 символів із поділом на абзацах; HTML-сторінка `/instructions` і видиме посилання додані на головну та сторінку входу.
+- Додано 3 unit-тести; `test_telegram_auth.py` + `test_instruction_rendering.py` пройшли (9/9), `py_compile` і HTML parsing пройшли, `git diff --check` чистий. Runtime/staging-тест не виконувався.
+- Наступний крок користувача: задеплоїти `dev` на staging, перевірити SHA `061c4a8`, запустити `make test`; вручну перевірити `/help`, `/instruction`, кнопку в Telegram та `/instructions` у браузері. Лок звільнено.
 
 ### 2026-11-23T14:39Z · етап 10 · takeover за дозволом користувача · ws-windows → ws-ubuntu
 - Користувач прямо дозволив продовжити роботу попри статус BUSY; перед цим `dev` синхронізовано через `git pull --ff-only origin dev` до `b36dff3`.
