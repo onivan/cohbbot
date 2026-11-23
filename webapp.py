@@ -176,6 +176,9 @@ class AIModelData(BaseModel):
     model_id: str
     api_key: Optional[str] = ""
     is_active: int = 0
+    input_price_per_million: Optional[float] = None
+    output_price_per_million: Optional[float] = None
+
 
 
 @app.get("/login")
@@ -525,7 +528,20 @@ async def set_budget_admin(admin_id: int, data: BudgetData, current_user: int = 
 # AI-МОДЕЛІ (OPENROUTER)
 # ==========================================
 
+def _ai_model_prices(data: AIModelData):
+    input_price = data.input_price_per_million
+    output_price = data.output_price_per_million
+    if (input_price is None) != (output_price is None):
+        raise HTTPException(status_code=400, detail="Вкажіть обидві ціни або залиште їх порожніми")
+    if input_price is not None and (
+            not math.isfinite(input_price) or not math.isfinite(output_price)
+            or input_price < 0 or output_price < 0):
+        raise HTTPException(status_code=400, detail="Ціни мають бути скінченними числами не менше нуля")
+    return input_price, output_price
+
+
 @app.get("/api/admin/ai")
+
 async def admin_get_ai_models(current_user: int = Depends(get_current_user)):
     if not database.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Доступ заборонено")
@@ -541,7 +557,12 @@ async def admin_add_ai_model(data: AIModelData, current_user: int = Depends(get_
     api_key = (data.api_key or "").strip()
     if not name or not model_id:
         raise HTTPException(status_code=400, detail="Назва та ID моделі обов'язкові")
-    new_id = await database.add_ai_model(name, model_id, api_key, is_active=bool(data.is_active))
+
+    input_price, output_price = _ai_model_prices(data)
+    new_id = await database.add_ai_model(
+        name, model_id, api_key, is_active=bool(data.is_active),
+        input_price_per_million=input_price, output_price_per_million=output_price,
+    )
     return {"status": "ok", "id": new_id}
 
 
@@ -553,10 +574,16 @@ async def admin_update_ai_model(model_pk: int, data: AIModelData, current_user: 
     model_id = (data.model_id or "").strip()
     if not name or not model_id:
         raise HTTPException(status_code=400, detail="Назва та ID моделі обов'язкові")
+
+    input_price, output_price = _ai_model_prices(data)
     # Порожній ключ = залишити поточний
     api_key = (data.api_key or "").strip() or None
-    ok = await database.update_ai_model(model_pk, name, model_id, api_key)
+    ok = await database.update_ai_model(
+        model_pk, name, model_id, api_key,
+        input_price_per_million=input_price, output_price_per_million=output_price,
+    )
     return {"status": "ok", "success": ok}
+
 
 
 @app.delete("/api/admin/ai/{model_pk}")
@@ -745,10 +772,15 @@ async def recognize_web_receipt(data: ReceiptRecognitionData,
             user_id=current_user,
             user_name=user_info.get("name", "Невідомо"),
             input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
             model_id=usage.get("model_id") or model_config.get("model_id"),
+
             ai_model_id=model_config.get("id"),
+            input_price_per_million=model_config.get("input_price_per_million"),
+            output_price_per_million=model_config.get("output_price_per_million"),
+            recognition_data=result,
         ))
+
 
     raw_date = str(result.get("receipt_date") or "").strip().split(" ")[0]
     try:
