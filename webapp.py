@@ -248,6 +248,32 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
 # ADMIN PANEL ENDPOINTS
 # ==========================================
 
+@app.get("/admin/instructions")
+async def admin_instructions_page(request: Request):
+    """Render the admin guide and require the same admin role as the panel."""
+    try:
+        user_id = get_current_user(request)
+    except HTTPException:
+        return Response(status_code=302, headers={"Location": "/login"})
+
+    if not database.is_admin(user_id):
+        return Response(status_code=302, headers={"Location": "/login"})
+
+    response = templates.TemplateResponse(
+        request=request,
+        name="admin_instruction.html",
+        context={"request": request, "user_id": user_id},
+    )
+    response.set_cookie(
+        key="session_token",
+        value=serializer.dumps(user_id),
+        httponly=True,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60,
+    )
+    return response
+
+
 @app.get("/admin")
 @app.get("/admin.html")
 async def admin_page(request: Request):

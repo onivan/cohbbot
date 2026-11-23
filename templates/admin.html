@@ -48,9 +48,12 @@
     </style>
 </head>
 <body>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
         <h2>Панель адміністратора</h2>
-        <a href="javascript:void(0)" onclick="goToMainPage()" style="color: #4CAF50; text-decoration: none; font-weight: bold;">← На головну</a>
+        <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+            <a href="/admin/instructions" style="color: #16803c; text-decoration: none; font-weight: bold;">📖 Інструкція</a>
+            <a href="javascript:void(0)" onclick="goToMainPage()" style="color: #4CAF50; text-decoration: none; font-weight: bold;">← На головну</a>
+        </div>
     </div>
 
     <div class="tabs">
