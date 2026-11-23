@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: BUSY
-- owner: ws-ubuntu
-- task: B5 bug reports (MVP)
-- branch: dev
-- since: 2026-11-23T15:49:00Z
-- note: Локальна реалізація завершена; очікує staging-тестів і ручного acceptance
+- state: FREE
+- owner: —
+- task: —
+- branch: —
+- since: —
+- note: B5 прийнято за підтвердженням користувача; наступний блокер production — staging acceptance етапу 10
 
 
 
@@ -34,6 +34,14 @@
 - Локальні `py_compile`, `node --check`, HTML parsing пройшли. `git -c core.whitespace=cr-at-eol diff --check` пройшов з урахуванням CRLF у наявних JS/HTML-файлах.
 - `python -m unittest test_bug_reports.py` у локальному оточенні не запустився: відсутній `aiomysql`. Staging-деплой і acceptance не виконувалися; B5 лишається відкритою.
 - Наступний крок: на staging виконати `./deploy.sh`, `make status` (перевірити SHA й active сервіс), `make test`; вручну перевірити форму → журнал, налаштування/403 для не-адміна, отримання DM та збереження репорту при вимкненій/недоступній доставці. Розробник має відкрити чат із ботом через `/start`.
+
+### 2026-11-23T18:58Z · B5 прийнято · production підготовка · ws-ubuntu → передача
+- Користувач підтвердив, що баг-репорти працюють; B5 закрито в `TODO.md`. Числовий вивід `make test` і точний staging SHA користувач не надав.
+- Production-клон перевірено read-only: `main` чиста й відповідає `origin/main` (`f95dbd1`); після `git fetch origin` `origin/dev` — `d03daeb`. `origin/main` є предком `origin/dev`; відставання — 131 коміт, fast-forward очікуваний. Merge/push `main` не виконувались.
+- `make status` із production-клону: VPS доступний, staging і production services — `active`. Локальний production `.vps.env` наявний із mode 600. Це не перевіряє SHA та чистоту production worktree на VPS.
+- Від diff `main..dev`: 49 файлів; додається `reportlab>=4.2,<5`, тому перед production restart користувач має вручну встановити requirements у prod venv за §I. Виправлено регламент production merge: використовувати `origin/dev` і `--ff-only`, бо локальної `dev` у production-клоні немає.
+- Staging acceptance етапу 10 (інструкції користувача й адміна) у BOARD/TODO досі не зафіксований; production merge/deploy не робити до підтвердження. Жодних змін на VPS не виконано.
+- Наступний крок: користувачу підтвердити етап 10 на staging (доступ до `/instructions` і `/admin/instructions`, блокування не-адміну), перевірити фактичний staging SHA та `make test`; після цього узгодити production restart window і виконувати checklist `TODO.md` §I.
 
 ### 2026-11-23T15:17Z · етап 10 follow-up · захоплення лока · ws-ubuntu
 - Користувач повідомив, що `/help` і кнопка «📖 Інструкція» не відповідають.
