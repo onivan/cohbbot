@@ -6,12 +6,13 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: —
+- state: BUSY
+- owner: ws-windows
+- task: Етап 10 — інструкції користувача й адміністратора
+- branch: feat/instructions-user-admin
+- since: 2026-11-23T13:25:04Z
+- note: Оновити інструкції під актуальний MVP UI та доступ із /help й адмін-панелі
+
 
 
 
