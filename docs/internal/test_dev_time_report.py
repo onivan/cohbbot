@@ -10,6 +10,11 @@ import dev_time_report
 
 
 class DevTimeReportTests(unittest.TestCase):
+    def test_internal_report_commit_is_identified(self):
+        self.assertTrue(dev_time_report.INTERNAL_REPORT_COMMIT.match(
+            "docs(internal): add Git-based development time report"
+        ))
+
     def test_conventional_subject_becomes_short_sentence(self):
         self.assertEqual(
             dev_time_report.describe_task("feat(api): add monthly report endpoint"),

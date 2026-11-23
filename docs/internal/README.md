@@ -17,10 +17,10 @@ The CSV columns are `hours`, `date`, and `tasks`. Multiple task descriptions for
 Git does not record time spent working, and file modification times are not reliable historical data after checkout, clone, or archive extraction. The report is therefore an estimate based on author timestamps and commit subjects, not a timesheet:
 
 - reads unique, non-merge commits reachable from local and remote refs;
-- ignores commits scoped as `(coord)` by default and excludes commits that only touch `docs/internal/`;
+- ignores commits scoped as `(coord)` by default and excludes commits that only touch `docs/internal/`; commits titled `docs(internal): ...` are also excluded, including ones that update `BOARD.md`;
 - groups same-day commits into sessions; a gap greater than 3 hours starts a new session;
 - estimates each session as the time between its first and last commit plus 0.5 hours, with a 1-hour minimum and an 8-hour maximum;
 - adds session estimates per day and rounds the daily total to the nearest integer hour, with half hours rounded up;
 - removes conventional commit prefixes, keeps the first clause, and limits task labels to 12 words; known Ukrainian commit subjects are translated. Unknown non-English subjects fall back to `Update the application`.
 
-These assumptions can over- or under-estimate actual effort. Adjust the session assumptions with `--idle-gap-hours`, `--padding-hours`, `--minimum-session-hours`, and `--maximum-session-hours`. Use `--include-coordination` to count `(coord)` commits. The internal tool and generated CSV are excluded from its own input, so refreshing the report does not count the report-generation commit as application work.
+These assumptions can over- or under-estimate actual effort. Adjust the session assumptions with `--idle-gap-hours`, `--padding-hours`, `--minimum-session-hours`, and `--maximum-session-hours`. Use `--include-coordination` to count `(coord)` commits. Internal paths and commits titled `docs(internal): ...` are excluded, so refreshing the report does not count the report-generation commit as application work.

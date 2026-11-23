@@ -11,7 +11,7 @@
 - task: —
 - branch: —
 - since: —
-- note: Internal development time CSV generator and initial report created; no application integration
+- note: Internal tool commits are excluded from the Git estimate; CSV regeneration is safe
 
 
 
@@ -22,6 +22,15 @@
 ---
 
 ## Журнал передач
+
+### 2026-11-23T20:03Z · Internal report exclusion follow-up · захоплення лока · ws-ubuntu
+- Перевіряю, що наступний запуск CSV-генератора не врахує власний внутрішній коміт, який також оновив BOARD.
+- Наступний крок: явно виключити `docs(internal):` subjects у генераторі, оновити README і тест, перегенерувати CSV.
+
+### 2026-11-23T20:04Z · Internal report exclusion follow-up · завершено · ws-ubuntu → передача
+- Генератор додатково відкидає `docs(internal):` commit subjects, щоб коміт інструмента, який також змінює BOARD, не рахувався як розробка застосунку.
+- CSV перегенеровано: 17 дат / 68 оцінених годин. 7 unit-тестів пройшли; змін runtime немає.
+- Наступний крок: оновлювати звіт локально за README; generated CSV і скрипт лишаються тільки у `docs/internal/`.
 
 ### 2026-11-23T19:57Z · Internal development time report · захоплення лока · ws-ubuntu
 - Користувач попросив standalone CSV-звіт про оцінену денну тривалість розробки та короткі задачі англійською.

@@ -30,6 +30,7 @@ COMMIT_PREFIX = re.compile(
     re.IGNORECASE,
 )
 COORDINATION_COMMIT = re.compile(r"^\w+\(coord\):", re.IGNORECASE)
+INTERNAL_REPORT_COMMIT = re.compile(r"^docs\(internal\):", re.IGNORECASE)
 CYRILLIC = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґ]")
 
 # Short, plain-English descriptions for the existing Ukrainian commit subjects.
@@ -124,6 +125,8 @@ def read_commit_events(repo_root: Path, include_coordination: bool = False) -> l
         if commit_hash in seen:
             continue
         seen.add(commit_hash)
+        if INTERNAL_REPORT_COMMIT.match(subject.strip()):
+            continue
         if not include_coordination and COORDINATION_COMMIT.match(subject.strip()):
             continue
         timestamp = datetime.fromisoformat(timestamp_text)
