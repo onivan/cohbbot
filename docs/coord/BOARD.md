@@ -11,7 +11,7 @@
 - task: —
 - branch: —
 - since: —
-- note: Обмеження PDF-чеків додано до TODO; documentation-only, runtime не змінювався
+- note: Internal development time CSV generator and initial report created; no application integration
 
 
 
@@ -22,6 +22,18 @@
 ---
 
 ## Журнал передач
+
+### 2026-11-23T19:57Z · Internal development time report · захоплення лока · ws-ubuntu
+- Користувач попросив standalone CSV-звіт про оцінену денну тривалість розробки та короткі задачі англійською.
+- Дані планується брати з author timestamps/subjects Git; поточні filesystem mtimes не є надійною історичною метаданою.
+- Наступний крок: додати внутрішній генератор із прозорою оцінювальною евристикою, README та CSV-артефакт; застосунок/Makefile/runtime не змінювати.
+
+### 2026-11-23T20:03Z · Internal development time report · завершено · ws-ubuntu → передача
+- Додано `docs/internal/dev_time_report.py`, README, unit-тести та перший `development_time_report.csv`; інструмент не підключений до застосунку.
+- Звіт: 17 дат, 68 оцінених годин сумарно після округлення; дані виведено з Git author timestamps і commit subjects, а не виміряно фактичний час.
+- Перевірки пройшли: 6 unit-тестів, py_compile, CSV schema/English-text validation, `git diff --check`.
+- Налаштування: 3h inactivity gap, 0.5h session padding, 1h min/8h max. Merge і coordination commits виключені за замовчуванням; `docs/internal/` виключено з аналізу.
+- Зміни лише внутрішні docs/tooling, runtime не змінювався. Наступний крок: оновлювати CSV командою `python3 docs/internal/dev_time_report.py` за потреби.
 
 ### 2026-11-23T19:50Z · PDF-чек · захоплення лока · ws-ubuntu
 - Користувач попросив задокументувати, що відбувається з PDF-чеком і чи перевіряє його ШІ.
