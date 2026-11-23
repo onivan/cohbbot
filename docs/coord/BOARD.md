@@ -6,12 +6,12 @@
 
 ## 🔒 Поточний статус
 
-- state: FREE
-- owner: —
-- task: —
-- branch: —
-- since: —
-- note: B5 прийнято за підтвердженням користувача; наступний блокер production — staging acceptance етапу 10
+- state: BUSY
+- owner: ws-ubuntu
+- task: MVP production release prep
+- branch: dev
+- since: 2026-11-23T19:03:00Z
+- note: Етапи B5 і 10 прийняті; підготовити fast-forward main та production handoff без деплою
 
 
 
@@ -22,6 +22,11 @@
 ---
 
 ## Журнал передач
+
+### 2026-11-23T19:03Z · MVP production prep · захоплення лока · ws-ubuntu
+- Користувач підтвердив успішний `make test` і ручне приймання етапу 10 (інструкції); B5 прийнято раніше.
+- Захоплено роботу з підготовки production release candidate. Production-деплой і рестарт залишаються за користувачем.
+- Наступний крок: закрити етап 10 у TODO/плані, актуалізувати refs у production-клоні, fast-forward `main` до прийнятого `dev`, перевірити diff і запушити `origin/main` без `deploy-main`.
 
 ### 2026-11-23T15:49Z · MVP баг-репорти · захоплення лока · ws-ubuntu
 - Користувач попросив реалізувати мінімальний баг-репорт до поточного релізу.
