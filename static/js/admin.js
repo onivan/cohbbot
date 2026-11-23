@@ -56,8 +56,9 @@ function switchTab(tabId) {
     if (tabId === 'matrix') loadMatrix();
     if (tabId === 'cash') { loadCash(); loadCashYear(); }
     if (tabId === 'ai') loadAiModels();
-        if (tabId === 'notifications') loadNotifications();
-    if (tabId === 'settings') loadBudgetAlertSettings();
+    if (tabId === 'notifications') loadNotifications();
+    if (tabId === 'settings') { loadBudgetAlertSettings(); loadBugReportSettings(); }
+
 
 }
 
@@ -367,7 +368,8 @@ const NOTIFICATION_TYPE_META = {
     cash_operation: { label: 'Операція з коштами', color: '#1976d2' },
     negative_balance: { label: 'Мінусовий баланс', color: '#8e24aa' },
     budget_overrun: { label: 'Перевитрата ліміту', color: '#ef6c00' },
-    budget_threshold: { label: 'Досягнуто порогу ліміту', color: '#00897b' }
+    budget_threshold: { label: 'Досягнуто порогу ліміту', color: '#00897b' },
+    bug_report: { label: 'Баг-репорт', color: '#795548' }
 };
 
 
@@ -431,9 +433,9 @@ async function loadNotifications(resetPage = false) {
         const receipt = n.receipt_path
             ? `<button type="button" class="btn-mini" style="background: #2196F3;" data-receipt-url="${cashEsc(n.receipt_path)}" data-receipt-title="${cashEsc('Чек: ' + (n.user_name || n.user_id || n.id))}" onclick="openReceiptFromButton(this)">📄 Переглянути чек</button>`
             : '';
-                const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
+        const chat = n.user_id ? `<a href="tg://user?id=${encodeURIComponent(n.user_id)}">Чат</a>` : '';
         const actionStatus = n.action_status || (n.status === 'resolved' ? 'resolved' : 'pending');
-                const presetAmount = n.payload && n.payload.amount ? Number(n.payload.amount) : null;
+        const presetAmount = n.payload && n.payload.amount ? Number(n.payload.amount) : null;
         const receiptDecision = n.type === 'invalid_receipt' && actionStatus === 'pending'
             ? `<button class="btn-mini" style="background:#2e7d32;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'approved', ${presetAmount === null ? 'null' : presetAmount})">Погодити</button>
                <button class="btn-mini" style="background:#c62828;color:#fff;" onclick="decideAdminReceipt(${n.id}, 'rejected')">Відхилити</button>`
@@ -446,7 +448,7 @@ async function loadNotifications(resetPage = false) {
             : `<button class="btn-mini" onclick="setNotificationStatus(${n.id}, 'open')">Відкрити знову</button>`].filter(Boolean).join(' ');
         const actionLabels = {pending:'Очікує рішення', approved:'✅ Погоджено', rejected:'❌ Відхилено', resolved:'✅ Опрацьовано'};
         const readLabel = n.read_at ? `Прочитане${n.read_by ? ` адміністратором #${cashEsc(n.read_by)}` : ''}` : 'Непрочитане';
-                const actionLabel = n.canceled_by_user
+        const actionLabel = n.canceled_by_user
             ? '🚫 Скасовано автором'
             : (actionLabels[actionStatus] || actionStatus);
         tr.innerHTML = `<td style="white-space:nowrap;">${cashEsc(n.created_at || '')}</td>
@@ -580,8 +582,50 @@ async function saveBudgetAlertSettings() {
     }
 }
 
+async function loadBugReportSettings() {
+    const status = document.getElementById('bug-report-telegram-id-status');
+    if (status) status.textContent = 'Завантаження…';
+    const res = await fetchWithAuth('/api/admin/settings/bug-report-telegram-id');
+    if (!res || !res.ok) {
+        if (status) status.textContent = 'Не вдалося завантажити налаштування.';
+        return;
+    }
+    const data = await res.json();
+    const input = document.getElementById('bug-report-telegram-id');
+    if (input) input.value = data.telegram_user_id || '';
+    if (status) status.textContent = data.telegram_user_id
+        ? 'Telegram-доставка налаштована.'
+        : 'Telegram-доставку вимкнено.';
+}
+
+async function saveBugReportTelegramId() {
+    const input = document.getElementById('bug-report-telegram-id');
+    const status = document.getElementById('bug-report-telegram-id-status');
+    const telegramUserId = input ? input.value.trim() : '';
+    if (telegramUserId && !/^\d{1,19}$/.test(telegramUserId)) {
+        if (status) status.textContent = 'Введіть числовий Telegram ID або очистьте поле.';
+        return;
+    }
+    if (status) status.textContent = 'Зберігаємо…';
+    const res = await fetchWithAuth('/api/admin/settings/bug-report-telegram-id', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({telegram_user_id: telegramUserId || null})
+    });
+    if (res && res.ok) {
+        const data = await res.json();
+        if (input) input.value = data.telegram_user_id || '';
+        if (status) status.textContent = data.telegram_user_id
+            ? 'Telegram-доставку збережено.'
+            : 'Telegram-доставку вимкнено.';
+    } else if (res) {
+        if (status) status.textContent = await cashApiError(res, 'Не вдалося зберегти Telegram ID.');
+    }
+}
+
 // ==========================================
 // ШІ-МОДЕЛІ (OPENROUTER)
+
 
 
 // ==========================================

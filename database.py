@@ -875,6 +875,61 @@ async def set_budget_alert_threshold(value) -> float:
     return value
 
 
+BUG_REPORT_TELEGRAM_ID_SETTING = 'bug_report_telegram_id'
+TELEGRAM_USER_ID_MAX = 2**63 - 1
+
+
+def validate_bug_report_telegram_id(value) -> str:
+    """Повертає нормалізований позитивний Telegram user ID або порожній рядок."""
+    if value is None:
+        return ''
+    if isinstance(value, bool):
+        raise ValueError("Telegram ID має містити лише цифри")
+    text = str(value).strip()
+    if not text:
+        return ''
+    if not text.isascii() or not text.isdecimal():
+        raise ValueError("Telegram ID має містити лише цифри")
+    normalized = str(int(text))
+    if not 1 <= int(normalized) <= TELEGRAM_USER_ID_MAX:
+        raise ValueError("Telegram ID поза допустимим діапазоном")
+    return normalized
+
+
+async def get_bug_report_telegram_id() -> str | None:
+    """Повертає Telegram ID розробника; некоректне старе значення вимикає доставку."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                'SELECT `value` FROM app_settings WHERE `key` = %s',
+                (BUG_REPORT_TELEGRAM_ID_SETTING,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return None
+    try:
+        value = validate_bug_report_telegram_id(row[0])
+    except (TypeError, ValueError, IndexError):
+        logging.error("Некоректне значення Telegram ID для баг-репортів; доставку вимкнено")
+        return None
+    return value or None
+
+
+async def set_bug_report_telegram_id(value) -> str | None:
+    """Зберігає Telegram ID для сповіщень або вимикає доставку порожнім значенням."""
+    normalized = validate_bug_report_telegram_id(value)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO app_settings (`key`, `value`) VALUES (%s, %s)
+                   ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)""",
+                (BUG_REPORT_TELEGRAM_ID_SETTING, normalized),
+            )
+    return normalized or None
+
+
 async def claim_budget_alert(center_id: int, category_id: str, month: str,
                              threshold: float, title: str, message: str,
                              payload: dict) -> bool:

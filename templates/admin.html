@@ -220,6 +220,7 @@
                 <option value="negative_balance">🟪 Мінусовий баланс</option>
                 <option value="budget_overrun">🟧 Перевитрата ліміту</option>
                 <option value="budget_threshold">🟩 Досягнуто порогу ліміту</option>
+                <option value="bug_report">🐞 Баг-репорт</option>
             </select>
             <select id="notification-read" onchange="loadNotifications(true)" style="padding:7px;">
                 <option value="">Прочитаність: усі</option><option value="false">Непрочитані</option><option value="true">Прочитані</option>
@@ -254,6 +255,15 @@
             <input type="number" id="budget-alert-threshold" min="1" max="100" step="1" style="width:100px; padding:7px;">
             <button type="button" onclick="saveBudgetAlertSettings()">Зберегти</button>
             <span id="budget-alert-settings-status" style="color:#666;"></span>
+        </div>
+
+        <h3 style="margin-top:28px;">Баг-репорти</h3>
+        <p>Нові баг-репорти зберігаються у журналі «Сповіщення» та надсилаються в особистий Telegram-чат розробника. Вкажіть числовий Telegram ID; розробник має спершу відкрити чат із ботом і надіслати <strong>/start</strong>. Залиште поле порожнім, щоб вимкнути Telegram-доставку.</p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label for="bug-report-telegram-id">Telegram ID розробника:</label>
+            <input type="text" id="bug-report-telegram-id" inputmode="numeric" maxlength="19" placeholder="Напр.: 123456789" style="width:190px; padding:7px;">
+            <button type="button" onclick="saveBugReportTelegramId()">Зберегти</button>
+            <span id="bug-report-telegram-id-status" role="status" style="color:#666;"></span>
         </div>
     </div>
 

@@ -18,12 +18,12 @@ check-vps:  ## (службова) перевірка, що адреса VPS за
 		echo "!! не задано COHB_VPS: cp .vps.env.example .vps.env && chmod 600 .vps.env" >&2; exit 1; }
 
 test: check-vps  ## backend-тести на VPS і headless browser acceptance проти staging
-	$(SSH) 'cd $(STAGING) && venv/bin/python -m unittest test_telegram_auth.py test_instruction_rendering.py test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_report_pdf.py && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
+	$(SSH) 'cd $(STAGING) && venv/bin/python -m unittest test_telegram_auth.py test_instruction_rendering.py test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_bug_reports.py test_report_pdf.py && venv/bin/python test_cash.py && venv/bin/python test_centers_own.py'
 	$(MAKE) --no-print-directory test-browser
 
 test-local:  ## тести локально (потрібен .env і доступ до БД)
 	python3 -m unittest test_telegram_auth.py test_instruction_rendering.py
-	venv/bin/python -m unittest test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_report_pdf.py
+	venv/bin/python -m unittest test_budget_spent.py test_budget_duplicate.py test_budget_notify.py test_budget_alerts.py test_bug_reports.py test_report_pdf.py
 	venv/bin/python test_cash.py
 	venv/bin/python test_centers_own.py
 

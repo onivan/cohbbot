@@ -172,6 +172,17 @@ class BudgetData(BaseModel):
 class BudgetAlertThresholdData(BaseModel):
     threshold: float
 
+
+class BugReportData(BaseModel):
+    title: Optional[str] = None
+    description: str
+    page: Optional[str] = None
+
+
+class BugReportRecipientData(BaseModel):
+    telegram_user_id: Optional[str] = None
+
+
 class AIModelData(BaseModel):
     name: str
     model_id: str
@@ -264,6 +275,89 @@ async def get_user_role(user_id: int, current_user: int = Depends(get_current_us
         "center_id": center_id
     }
 
+
+def _bug_report_telegram_message(user_id: int, user_info: dict, title: str,
+                                 description: str, page: str) -> str:
+    """Plain-text Telegram message; user content is never interpreted as markup."""
+    return (
+        "🐞 Баг-репорт з CoH Expense Tracker\n"
+        f"Користувач: {user_info.get('name') or 'Невідомо'} (ID {int(user_id)})\n"
+        f"ЦН: {user_info.get('center') or '—'}\n"
+        f"Сторінка: {page}\n"
+        f"Заголовок: {title or '—'}\n\n"
+        f"{description}"
+    )
+
+
+@app.post("/api/bug-reports")
+async def submit_bug_report(data: BugReportData, request: Request,
+                           current_user: int = Depends(get_current_user)):
+    title = (data.title or '').strip()
+    description = (data.description or '').strip()
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="Заголовок має бути не довшим за 120 символів")
+    if not 10 <= len(description) <= 2000:
+        raise HTTPException(status_code=400, detail="Опишіть проблему (10–2000 символів)")
+
+    page = (data.page or '/').strip()
+    if (len(page) > 120 or not page.startswith('/') or page.startswith('//')
+            or any(char in page for char in ('\\r', '\\n', '\\t'))):
+        page = '/'
+
+    user_info = database.users_cache.get(str(current_user), {})
+    center_id = user_info.get('center_id')
+    if not center_id:
+        try:
+            center_id = await database.get_user_center_id(current_user)
+        except Exception:
+            logging.exception("Не вдалося отримати ЦН автора баг-репорту %s", current_user)
+            center_id = None
+
+    notification_id = await database.create_admin_notification(
+        type='bug_report',
+        title=f"🐞 {title or description[:80]}",
+        message=description,
+        center_id=int(center_id) if center_id else None,
+        user_id=int(current_user),
+        payload={"source": "webapp", "page": page},
+        action_status='resolved',
+    )
+
+    delivery_status = 'not_configured'
+    try:
+        recipient_id = await database.get_bug_report_telegram_id()
+    except Exception:
+        logging.exception("Не вдалося прочитати адресу для баг-репортів")
+        recipient_id = None
+        delivery_status = 'failed'
+
+    if recipient_id:
+        try:
+            sent_message = await bot.send_message(
+                int(recipient_id),
+                _bug_report_telegram_message(
+                    current_user, user_info, title, description, page
+                ),
+            )
+            delivery_status = 'sent'
+            try:
+                await database.save_admin_notification_messages(notification_id, [{
+                    'chat_id': int(recipient_id),
+                    'message_id': int(sent_message.message_id),
+                    'kind': 'text',
+                }])
+            except Exception:
+                logging.exception("Не вдалося зберегти Telegram reference баг-репорту %s", notification_id)
+        except Exception:
+            logging.exception("Не вдалося надіслати баг-репорт у Telegram")
+            delivery_status = 'failed'
+
+    return {
+        "status": "ok",
+        "notification_id": notification_id,
+        "delivery_status": delivery_status,
+    }
+
 # ==========================================
 # ADMIN PANEL ENDPOINTS
 # ==========================================
@@ -332,6 +426,26 @@ async def admin_set_budget_alert_threshold(data: BudgetAlertThresholdData,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok", "threshold": threshold}
+
+
+@app.get("/api/admin/settings/bug-report-telegram-id")
+async def admin_get_bug_report_telegram_id(current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    return {
+        "status": "ok",
+        "telegram_user_id": await database.get_bug_report_telegram_id(),
+    }
+
+
+@app.put("/api/admin/settings/bug-report-telegram-id")
+async def admin_set_bug_report_telegram_id(data: BugReportRecipientData,
+                                           current_user: int = Depends(get_current_user)):
+    _require_admin(current_user)
+    try:
+        telegram_user_id = await database.set_bug_report_telegram_id(data.telegram_user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "telegram_user_id": telegram_user_id}
 
 
 @app.get("/api/admin/notifications")

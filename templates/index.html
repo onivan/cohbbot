@@ -31,6 +31,7 @@
         <button id="btn-my-cash" style="flex: 1; min-width: 80px; background: #00897B; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openMyCashModal()">💰 Кошти</button>
         <button id="btn-expense-report" style="flex: 1; min-width: 80px; background: #455A64; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="downloadExpenseReport()">📄 Звіт PDF</button>
         <button id="btn-add-expense" style="flex: 1; min-width: 80px; display: none; padding: 8px 4px; font-size: 0.85em;" onclick="openForm()">➕ Додати</button>
+        <button id="btn-bug-report" type="button" style="flex: 1; min-width: 80px; background: #795548; padding: 8px 4px; font-size: 0.85em;" onclick="openBugReportModal()">🐞 Повідомити про баг</button>
     </div>
     
     <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
@@ -234,6 +235,26 @@
             <div id="admin-debug-panel" style="display: none; font-family: monospace; font-size: 0.7em; background: #333; color: #0f0; padding: 10px; margin-bottom: 10px; border-radius: 5px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
                 Admin debug panel (waiting for data...)
             </div>
+        </div>
+    </div>
+
+    <div id="bug-report-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); padding: 20px; box-sizing: border-box; z-index: 150; overflow-y: auto;">
+        <div class="modal-content" style="max-width: 520px; margin: 20px auto;">
+            <div class="modal-actions-top" style="justify-content: flex-end;">
+                <button type="button" class="btn-danger" onclick="closeBugReportModal()">Закрити</button>
+                <button type="button" id="btn-submit-bug-report" style="background: #795548; color: white;" onclick="submitBugReport()">Надіслати</button>
+            </div>
+            <h3 style="margin-top: 0;">Повідомити про проблему</h3>
+            <p style="font-size: 0.9em; color: var(--tg-theme-hint-color, #777);">Опишіть, що сталося та як це повторити. Не додавайте паролі чи інші секретні дані.</p>
+            <div class="form-group">
+                <label for="bug-report-title">Короткий заголовок (необов’язково):</label>
+                <input type="text" id="bug-report-title" maxlength="120" placeholder="Напр.: Не зберігається витрата">
+            </div>
+            <div class="form-group">
+                <label for="bug-report-description">Опис проблеми:</label>
+                <textarea id="bug-report-description" rows="6" maxlength="2000" required placeholder="Що ви очікували і що сталося насправді?"></textarea>
+            </div>
+            <div id="bug-report-status" role="status" aria-live="polite" style="font-size: 0.9em; min-height: 1.4em;"></div>
         </div>
     </div>
 

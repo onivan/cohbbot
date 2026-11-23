@@ -70,6 +70,59 @@ async function openAdminPage() {
     }
 }
 
+function openBugReportModal() {
+    const modal = document.getElementById('bug-report-modal');
+    if (!modal) return;
+    document.getElementById('bug-report-title').value = '';
+    document.getElementById('bug-report-description').value = '';
+    setBugReportStatus('');
+    modal.style.display = 'block';
+}
+
+function closeBugReportModal() {
+    const modal = document.getElementById('bug-report-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function setBugReportStatus(message, kind = 'info') {
+    const status = document.getElementById('bug-report-status');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = kind === 'error' ? '#b71c1c' : kind === 'warning' ? '#795548' : '#1b5e20';
+}
+
+async function submitBugReport() {
+    const title = document.getElementById('bug-report-title').value.trim();
+    const description = document.getElementById('bug-report-description').value.trim();
+    const button = document.getElementById('btn-submit-bug-report');
+    if (description.length < 10) {
+        setBugReportStatus('Додайте опис щонайменше з 10 символів.', 'error');
+        return;
+    }
+    if (button) button.disabled = true;
+    setBugReportStatus('Надсилаємо…');
+    try {
+        const response = await fetch('/api/bug-reports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, description, page: window.location.pathname })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Не вдалося надіслати репорт.');
+        document.getElementById('bug-report-title').value = '';
+        document.getElementById('bug-report-description').value = '';
+        if (result.delivery_status === 'sent') {
+            setBugReportStatus('Дякуємо! Репорт збережено й надіслано розробнику.', 'info');
+        } else {
+            setBugReportStatus('Репорт збережено в журналі, але Telegram-сповіщення не доставлено. Адміністратор перевірить налаштування.', 'warning');
+        }
+    } catch (error) {
+        setBugReportStatus(error.message || 'Не вдалося надіслати репорт. Спробуйте ще раз.', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 function parseDate(rawDate) {
     if (!rawDate) return null;
     if (!isNaN(rawDate) && !String(rawDate).includes('-') && !String(rawDate).includes('.')) {
@@ -1933,6 +1986,7 @@ function renderCategorySelectOptions() {
 // ==========================================
 // Порядок у списку = порядок «зверху вниз»: першою закривається та, що відкрита зверху
 const MODAL_CLOSERS = [
+    { id: 'bug-report-modal', close: () => closeBugReportModal() },
     { id: 'my-cash-modal', close: () => closeMyCashModal() },
     { id: 'receipt-modal', close: () => closeReceipt() },
     { id: 'admin-budgets-modal', close: () => closeAdminModal() },
