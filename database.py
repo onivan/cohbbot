@@ -1055,32 +1055,89 @@ async def ensure_ai_schema():
                     `model_id` VARCHAR(191) NOT NULL COMMENT 'ID моделі OpenRouter',
                     `api_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'API-ключ OpenRouter',
                     `is_active` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 - активна модель',
+                    `input_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL COMMENT 'USD за 1 млн вхідних токенів',
+                    `output_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL COMMENT 'USD за 1 млн вихідних токенів',
                     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
-            # Колонки для статистики по моделях (можуть вже існувати)
-            for ddl in (
+            migrations = (
                 "ALTER TABLE `api_logs` ADD COLUMN `model_id` VARCHAR(191) NULL",
                 "ALTER TABLE `api_logs` ADD COLUMN `ai_model_id` INT NULL",
-            ):
+                "ALTER TABLE `api_logs` ADD COLUMN `is_receipt` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `document_type_present` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `date_present` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `amount_present` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `expense_name_present` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` ADD COLUMN `category_present` TINYINT(1) NULL DEFAULT NULL",
+                "ALTER TABLE `api_logs` MODIFY COLUMN `estimated_cost` DECIMAL(14,10) NULL DEFAULT NULL",
+                "ALTER TABLE `ai_settings` ADD COLUMN `input_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL",
+                "ALTER TABLE `ai_settings` ADD COLUMN `output_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL",
+            )
+            for ddl in migrations:
                 try:
                     await cur.execute(ddl)
                 except Exception:
-                    pass  # колонка вже існує (помилка 1060)
+                    # Startup migration must also tolerate columns created in an earlier run.
+                    pass
+
+
+def _recognition_quality_flags(recognition_data):
+    """Completeness indicators, not ground-truth accuracy; old logs remain NULL."""
+    if not isinstance(recognition_data, dict):
+        return (None,) * 6
+    is_receipt = recognition_data.get('is_receipt')
+    if not isinstance(is_receipt, bool):
+        is_receipt = None
+
+    document_type = recognition_data.get('document_type')
+    doc_type_present = int(isinstance(document_type, str) and bool(document_type.strip()))
+    if is_receipt is not True:
+        return is_receipt, doc_type_present, None, None, None, None
+
+    raw_date = recognition_data.get('receipt_date')
+    try:
+        datetime.strptime(str(raw_date or '').strip()[:10], '%Y-%m-%d')
+        date_present = 1
+    except (TypeError, ValueError):
+        date_present = 0
+    try:
+        amount = float(str(recognition_data.get('amount') or '').replace(',', '.'))
+        amount_present = int(math.isfinite(amount) and amount > 0)
+    except (TypeError, ValueError):
+        amount_present = 0
+    name = recognition_data.get('expense_name')
+    category = recognition_data.get('category')
+    return (
+        is_receipt, doc_type_present, date_present, amount_present,
+        int(isinstance(name, str) and bool(name.strip())),
+        int(isinstance(category, str) and bool(category.strip())),
+    )
 
 
 async def log_api_usage(user_id: int, user_name: str, input_tokens: int,
                         output_tokens: int, model_id: str = None,
-                        ai_model_id: int = None):
+                        ai_model_id: int = None, input_price_per_million=None,
+                        output_price_per_million=None, recognition_data=None):
     pool = await get_pool()
-    estimated_cost = (input_tokens * 0.000075) + (output_tokens * 0.00030)
+    if input_price_per_million is None or output_price_per_million is None:
+        estimated_cost = None
+    else:
+        estimated_cost = (
+            int(input_tokens or 0) * float(input_price_per_million)
+            + int(output_tokens or 0) * float(output_price_per_million)
+        ) / 1_000_000
+    quality_flags = _recognition_quality_flags(recognition_data)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
                 INSERT INTO api_logs
-                    (user_id, user_name, input_tokens, output_tokens, estimated_cost, model_id, ai_model_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (user_id, user_name, input_tokens, output_tokens, estimated_cost, model_id, ai_model_id))
+                    (user_id, user_name, input_tokens, output_tokens, estimated_cost, model_id, ai_model_id,
+                     is_receipt, document_type_present, date_present, amount_present,
+                     expense_name_present, category_present)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, user_name, input_tokens, output_tokens, estimated_cost,
+                  model_id, ai_model_id, *quality_flags))
+
 
 
 async def get_active_ai_model():
@@ -1094,8 +1151,11 @@ async def get_active_ai_model():
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute("""
-                    SELECT id, name, model_id, api_key FROM ai_settings
+                    SELECT id, name, model_id, api_key,
+                           input_price_per_million, output_price_per_million
+                    FROM ai_settings
                     WHERE is_active = 1 ORDER BY id ASC LIMIT 1
+
                 """)
                 row = await cur.fetchone()
         if row:
@@ -1103,8 +1163,11 @@ async def get_active_ai_model():
                 'id': row['id'],
                 'name': row['name'],
                 'model_id': row['model_id'],
-                'api_key': (row['api_key'] or '').strip(),
+                                'api_key': (row['api_key'] or '').strip(),
+                'input_price_per_million': row.get('input_price_per_million'),
+                'output_price_per_million': row.get('output_price_per_million'),
             }
+
     except Exception as e:
         logging.error(f"Не вдалося прочитати ai_settings: {e}")
 
@@ -1114,18 +1177,22 @@ async def get_active_ai_model():
             'id': None,
             'name': 'ENV (за замовчуванням)',
             'model_id': OPENROUTER_MODEL,
-            'api_key': OPENROUTER_API_KEY.strip(),
+                        'api_key': OPENROUTER_API_KEY.strip(),
+            'input_price_per_million': None,
+            'output_price_per_million': None,
         }
+
     return None
 
 
 async def get_ai_models():
-    """Повертає всі AI-моделі разом зі статистикою використання (чеки, токени)."""
+    """Повертає моделі з використанням, оціненими витратами та completeness-показниками."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
                 SELECT id, name, model_id, is_active,
+                       input_price_per_million, output_price_per_million,
                        CASE WHEN api_key IS NULL OR api_key = '' THEN 0 ELSE 1 END AS has_key
                 FROM ai_settings
                 ORDER BY is_active DESC, name ASC
@@ -1134,8 +1201,22 @@ async def get_ai_models():
 
             await cur.execute("""
                 SELECT ai_model_id,
-                       COUNT(*) AS receipts,
-                       COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens
+                       COUNT(*) AS requests,
+                       COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+                       SUM(estimated_cost IS NOT NULL) AS priced_requests,
+                       SUM(estimated_cost) AS total_cost,
+                       SUM(is_receipt IS NOT NULL) AS receipt_decisions,
+                       SUM(is_receipt = 1) AS predicted_receipts,
+                       SUM(document_type_present IS NOT NULL) AS doc_type_applicable,
+                       SUM(document_type_present = 1) AS doc_type_complete,
+                       SUM(is_receipt = 1 AND date_present IS NOT NULL) AS date_applicable,
+                       SUM(is_receipt = 1 AND date_present = 1) AS date_complete,
+                       SUM(is_receipt = 1 AND amount_present IS NOT NULL) AS amount_applicable,
+                       SUM(is_receipt = 1 AND amount_present = 1) AS amount_complete,
+                       SUM(is_receipt = 1 AND expense_name_present IS NOT NULL) AS name_applicable,
+                       SUM(is_receipt = 1 AND expense_name_present = 1) AS name_complete,
+                       SUM(is_receipt = 1 AND category_present IS NOT NULL) AS category_applicable,
+                       SUM(is_receipt = 1 AND category_present = 1) AS category_complete
                 FROM api_logs
                 WHERE ai_model_id IS NOT NULL
                 GROUP BY ai_model_id
@@ -1143,51 +1224,90 @@ async def get_ai_models():
             stats_rows = await cur.fetchall()
 
     stats = {r['ai_model_id']: r for r in stats_rows}
+    metric_fields = {
+        'document_type': ('doc_type_complete', 'doc_type_applicable'),
+        'date': ('date_complete', 'date_applicable'),
+        'amount': ('amount_complete', 'amount_applicable'),
+        'expense_name': ('name_complete', 'name_applicable'),
+        'category': ('category_complete', 'category_applicable'),
+    }
     result = []
     for m in models:
-        st = stats.get(m['id'])
-        receipts = int(st['receipts']) if st else 0
-        total_tokens = int(st['total_tokens']) if st else 0
+        st = stats.get(m['id']) or {}
+        requests = int(st.get('requests') or 0)
+        total_tokens = int(st.get('total_tokens') or 0)
+        total_cost = float(st['total_cost']) if st.get('total_cost') is not None else None
+        completeness = {}
+        overall_complete = 0
+        overall_applicable = 0
+        for field, (complete_key, applicable_key) in metric_fields.items():
+            complete = int(st.get(complete_key) or 0)
+            applicable = int(st.get(applicable_key) or 0)
+            completeness[field] = {'complete': complete, 'applicable': applicable}
+            if field != 'document_type':
+                overall_complete += complete
+                overall_applicable += applicable
         result.append({
             'id': m['id'],
             'name': m['name'],
             'model_id': m['model_id'],
             'is_active': int(m['is_active']),
             'has_key': int(m['has_key']),
-            'receipts': receipts,
+            'input_price_per_million': float(m['input_price_per_million']) if m.get('input_price_per_million') is not None else None,
+            'output_price_per_million': float(m['output_price_per_million']) if m.get('output_price_per_million') is not None else None,
+            'requests': requests,
+            'receipts': int(st.get('predicted_receipts') or 0),
+            'receipt_decisions': int(st.get('receipt_decisions') or 0),
             'total_tokens': total_tokens,
-            'tokens_per_receipt': round(total_tokens / receipts, 1) if receipts else 0,
+            'tokens_per_receipt': round(total_tokens / requests, 1) if requests else 0,
+            'priced_requests': int(st.get('priced_requests') or 0),
+            'total_cost': total_cost,
+            'average_cost': total_cost / int(st.get('priced_requests') or 1) if total_cost is not None else None,
+            'completeness': completeness,
+            'overall_completeness': {'complete': overall_complete, 'applicable': overall_applicable},
         })
     return result
 
 
-async def add_ai_model(name: str, model_id: str, api_key: str, is_active: bool = False) -> int:
+async def add_ai_model(name: str, model_id: str, api_key: str, is_active: bool = False,
+                       input_price_per_million=None, output_price_per_million=None) -> int:
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             if is_active:
                 await cur.execute("UPDATE ai_settings SET is_active = 0")
             await cur.execute("""
-                INSERT INTO ai_settings (name, model_id, api_key, is_active)
-                VALUES (%s, %s, %s, %s)
-            """, (name, model_id, api_key, 1 if is_active else 0))
+                                INSERT INTO ai_settings
+                    (name, model_id, api_key, is_active, input_price_per_million, output_price_per_million)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (name, model_id, api_key, 1 if is_active else 0,
+                  input_price_per_million, output_price_per_million))
+
             return cur.lastrowid
 
 
-async def update_ai_model(model_pk: int, name: str, model_id: str, api_key: str = None) -> bool:
-    """api_key=None означає «не змінювати існуючий ключ»."""
+async def update_ai_model(model_pk: int, name: str, model_id: str, api_key: str = None,
+                          input_price_per_million=None, output_price_per_million=None) -> bool:
+    """api_key=None означає «не змінювати існуючий ключ». Ціни можна залишити порожніми."""
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             if api_key is None:
                 await cur.execute(
-                    "UPDATE ai_settings SET name=%s, model_id=%s WHERE id=%s",
-                    (name, model_id, model_pk)
+                                        """UPDATE ai_settings SET name=%s, model_id=%s,
+                       input_price_per_million=%s, output_price_per_million=%s WHERE id=%s""",
+                    (name, model_id, input_price_per_million, output_price_per_million, model_pk)
+
                 )
             else:
                 await cur.execute(
-                    "UPDATE ai_settings SET name=%s, model_id=%s, api_key=%s WHERE id=%s",
-                    (name, model_id, api_key, model_pk)
+                                        """UPDATE ai_settings SET name=%s, model_id=%s, api_key=%s,
+                       input_price_per_million=%s, output_price_per_million=%s WHERE id=%s""",
+                    (name, model_id, api_key, input_price_per_million,
+                     output_price_per_million, model_pk)
+
                 )
             return cur.rowcount > 0
 

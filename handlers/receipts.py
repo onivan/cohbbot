@@ -325,8 +325,12 @@ async def process_receipt_photo_file(message: types.Message, state: FSMContext,
                     user_name=user_name,
                     input_tokens=usage.get('input_tokens', 0),
                     output_tokens=usage.get('output_tokens', 0),
-                    model_id=usage.get('model_id') or model_config.get('model_id'),
+                                        model_id=usage.get('model_id') or model_config.get('model_id'),
                     ai_model_id=model_config.get('id'),
+                    input_price_per_million=model_config.get('input_price_per_million'),
+                    output_price_per_million=model_config.get('output_price_per_million'),
+                    recognition_data=data,
+
                 )
             )
         

@@ -596,23 +596,34 @@ async function loadAiModels() {
 
     allAiModels = data.data || [];
     const tbody = document.querySelector('#ai-table tbody');
-    if (tbody) {
+        if (tbody) {
         tbody.innerHTML = '';
         if (!allAiModels.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Ще не додано жодної моделі</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Ще не додано жодної моделі</td></tr>';
         }
         allAiModels.forEach(m => {
             const tr = document.createElement('tr');
             const activeLabel = m.is_active ? '<strong style="color:#4CAF50;">Так</strong>' : 'Ні';
             const keyLabel = m.has_key ? 'є' : '<span style="color:#f44336;">немає</span>';
+            const pct = (metric) => metric && metric.applicable
+                ? `${Math.round(100 * metric.complete / metric.applicable)}% (${metric.complete}/${metric.applicable})`
+                : '—';
+            const completeness = m.completeness || {};
+            const receiptCompleteness = ['date', 'amount', 'expense_name', 'category']
+                .map(field => `${field}: ${pct(completeness[field])}`).join('\n');
+            const estimatedCost = m.total_cost === null || m.total_cost === undefined
+                ? '—' : `$${Number(m.total_cost).toFixed(6)} (${m.priced_requests}/${m.requests})`;
+            const price = (value) => value === null || value === undefined ? '—' : `$${Number(value).toFixed(4)}`;
             tr.innerHTML = `
-                <td>${m.name}</td>
-                <td>${m.model_id}</td>
-                <td style="text-align:center;">${keyLabel}</td>
-                <td style="text-align:center;">${activeLabel}</td>
-                <td style="text-align:right;">${m.receipts}</td>
-                <td style="text-align:right;">${m.total_tokens}</td>
-                <td style="text-align:right;">${m.tokens_per_receipt}</td>
+                <td>${cashEsc(m.name)}</td>
+                <td>${cashEsc(m.model_id)}</td>
+                <td style="text-align:right;">${price(m.input_price_per_million)}</td>
+                <td style="text-align:right;">${price(m.output_price_per_million)}</td>
+                <td style="text-align:center;">${keyLabel} · ${activeLabel}</td>
+                <td style="text-align:right;">${m.requests}</td>
+                <td style="text-align:right;">${Number(m.total_tokens).toLocaleString()}</td>
+                <td style="text-align:right;" title="Вартість показана лише для запитів із заданим тарифом">${estimatedCost}</td>
+                <td style="white-space:pre-line;" title="Повнота заповнення відповіді моделі, не точність розпізнавання">${cashEsc(receiptCompleteness)}</td>
                 <td>
                     <button onclick="editAiModel(${m.id})">Редагувати</button>
                     ${m.is_active ? '' : `<button onclick="activateAiModel(${m.id})" style="background:#4CAF50;color:#fff;">Активувати</button>`}
@@ -622,6 +633,7 @@ async function loadAiModels() {
             tbody.appendChild(tr);
         });
     }
+
     return true;
 }
 
@@ -629,8 +641,11 @@ function openAiModal() {
     document.getElementById('ai-id').value = '';
     document.getElementById('ai-name').value = '';
     document.getElementById('ai-model-id').value = '';
-    document.getElementById('ai-api-key').value = '';
+        document.getElementById('ai-api-key').value = '';
+    document.getElementById('ai-input-price').value = '';
+    document.getElementById('ai-output-price').value = '';
     document.getElementById('ai-modal-title').innerText = 'Додати модель';
+
     document.getElementById('ai-modal').style.display = 'block';
 }
 
@@ -640,8 +655,11 @@ function editAiModel(id) {
     document.getElementById('ai-id').value = m.id;
     document.getElementById('ai-name').value = m.name;
     document.getElementById('ai-model-id').value = m.model_id;
-    document.getElementById('ai-api-key').value = '';
+        document.getElementById('ai-api-key').value = '';
+    document.getElementById('ai-input-price').value = m.input_price_per_million ?? '';
+    document.getElementById('ai-output-price').value = m.output_price_per_million ?? '';
     document.getElementById('ai-modal-title').innerText = 'Редагувати модель';
+
     document.getElementById('ai-modal').style.display = 'block';
 }
 
@@ -654,15 +672,29 @@ async function saveAiModel() {
     const name = document.getElementById('ai-name').value.trim();
     const modelId = document.getElementById('ai-model-id').value.trim();
     const apiKey = document.getElementById('ai-api-key').value.trim();
+    const inputPriceText = document.getElementById('ai-input-price').value.trim();
+    const outputPriceText = document.getElementById('ai-output-price').value.trim();
+    const inputPrice = inputPriceText === '' ? null : Number(inputPriceText);
+    const outputPrice = outputPriceText === '' ? null : Number(outputPriceText);
 
     if (!name || !modelId) return alert('Назва та ID моделі обов\'язкові');
+    if ((inputPrice === null) !== (outputPrice === null)
+            || (inputPrice !== null && (!Number.isFinite(inputPrice) || inputPrice < 0
+                || !Number.isFinite(outputPrice) || outputPrice < 0))) {
+        return alert('Вкажіть обидві ціни як скінченні числа не менше нуля або залиште обидва поля порожніми.');
+    }
 
     const url = id ? `/api/admin/ai/${id}` : '/api/admin/ai';
+
     const method = id ? 'PUT' : 'POST';
     const res = await fetchWithAuth(url, {
         method: method,
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: name, model_id: modelId, api_key: apiKey})
+                body: JSON.stringify({
+            name: name, model_id: modelId, api_key: apiKey,
+            input_price_per_million: inputPrice, output_price_per_million: outputPrice
+        })
+
     });
 
     if (res && res.ok) {

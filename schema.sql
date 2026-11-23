@@ -97,27 +97,37 @@ CREATE TABLE IF NOT EXISTS `budget_alerts` (
     CONSTRAINT `fk_budget_alert_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 7. Таблиця логів AI токенів (Gemini)
+-- 7. Логи успішних відповідей AI; completeness-поля не є оцінкою фактичної точності.
 CREATE TABLE IF NOT EXISTS `api_logs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `user_id` BIGINT NOT NULL,
     `user_name` VARCHAR(191) NOT NULL,
     `input_tokens` INT NOT NULL DEFAULT 0,
     `output_tokens` INT NOT NULL DEFAULT 0,
-    `estimated_cost` DECIMAL(10, 6) NOT NULL DEFAULT 0.000000,
+    `estimated_cost` DECIMAL(14, 10) NULL DEFAULT NULL COMMENT 'USD estimate; NULL = tariff невідомий',
     `model_id` VARCHAR(191) NULL COMMENT 'ID моделі OpenRouter',
     `ai_model_id` INT NULL COMMENT 'FK на ai_settings.id',
+    `is_receipt` TINYINT(1) NULL DEFAULT NULL COMMENT 'Відповідь моделі; NULL для старих логів',
+    `document_type_present` TINYINT(1) NULL DEFAULT NULL,
+    `date_present` TINYINT(1) NULL DEFAULT NULL,
+    `amount_present` TINYINT(1) NULL DEFAULT NULL,
+    `expense_name_present` TINYINT(1) NULL DEFAULT NULL,
+    `category_present` TINYINT(1) NULL DEFAULT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- 7.1. Таблиця налаштувань AI-моделей (OpenRouter)
 CREATE TABLE IF NOT EXISTS `ai_settings` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `name` VARCHAR(191) NOT NULL COMMENT 'Назва моделі для адміна',
     `model_id` VARCHAR(191) NOT NULL COMMENT 'ID моделі OpenRouter',
-    `api_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'API-ключ OpenRouter',
+        `api_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'API-ключ OpenRouter',
     `is_active` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 - активна модель',
+    `input_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL COMMENT 'USD за 1 млн вхідних токенів',
+    `output_price_per_million` DECIMAL(14,8) NULL DEFAULT NULL COMMENT 'USD за 1 млн вихідних токенів',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 8. Таблиця кодів автентифікації для веб-додатка
